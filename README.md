@@ -4,13 +4,7 @@ O **SARA** é um sistema web para gestão, monitoramento e análise da atuação
 
 ---
 
-## 📌 Resumo do Projeto
 
-Interface web administrativa que permite cadastrar, visualizar e acompanhar políticos, seus gastos, elegibilidade, demandas públicas e atuação legislativa em um painel integrado.
-
----
-
-## ⚙️ Funcionalidades
 
 - 📊 **Dashboard** com métricas gerais do sistema  
 - 👤 **Gestão de políticos** (cadastro, listagem e filtros)  
