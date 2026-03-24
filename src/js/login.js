@@ -16,18 +16,14 @@ const PERMISSIONS_LIST = [
 
 const ROLE_DEFAULTS = {
   admin:    ['view_dashboard','view_politicians','edit_politicians','view_expenses','edit_expenses','view_eligibility','view_demands','edit_demands','reports','admin'],
-  gestor:   ['view_dashboard','view_politicians','edit_politicians','view_expenses','edit_expenses','view_eligibility','view_demands','edit_demands','reports'],
-  analista: ['view_dashboard','view_politicians','view_expenses','view_eligibility','view_demands','edit_demands'],
   viewer:   ['view_dashboard','view_politicians','view_expenses','view_eligibility','view_demands'],
 };
 
-const ROLE_LABELS = { admin:'Administrador', gestor:'Gestor', analista:'Analista', viewer:'Visualizador' };
+const ROLE_LABELS = { admin:'Administrador', viewer:'Visualizador' };
 
 let users = [
   { id:1, name:'Administrador do Sistema', username:'admin',    password:'admin123',   email:'admin@sisgov.br',    role:'admin',    active:true,  lastLogin:'Hoje, 09:14', createdAt:'01/01/2025', permissions:[...ROLE_DEFAULTS.admin] },
-  { id:2, name:'Gestora Regional',         username:'gestor',   password:'gestor123',  email:'gestor@sisgov.br',   role:'gestor',   active:true,  lastLogin:'Hoje, 08:55', createdAt:'15/01/2025', permissions:[...ROLE_DEFAULTS.gestor] },
-  { id:3, name:'Analista de Dados',        username:'analista', password:'analista123',email:'analista@sisgov.br', role:'analista', active:true,  lastLogin:'Ontem, 16:22',createdAt:'20/01/2025', permissions:[...ROLE_DEFAULTS.analista] },
-  { id:4, name:'Visualizador Público',     username:'viewer',   password:'viewer123',  email:'viewer@sisgov.br',   role:'viewer',   active:false, lastLogin:'05/03/2025',  createdAt:'01/02/2025', permissions:[...ROLE_DEFAULTS.viewer] },
+  { id:4, name:'Visualizador Público',     username:'viewer',   password:'viewer123',  email:'viewer@sisgov.br',   role:'viewer',   active:true, lastLogin:'05/03/2025',  createdAt:'01/02/2025', permissions:[...ROLE_DEFAULTS.viewer] },
 ];
 
 let nextId = 5;
@@ -235,8 +231,6 @@ function renderDetail() {
           <div class="field-label">Perfil de Acesso</div>
           <select class="field-select" id="edit-role-${user.id}" onchange="applyRoleDefaults(${user.id},this.value)">
             <option value="admin" ${user.role==='admin'?'selected':''}>Administrador</option>
-            <option value="gestor" ${user.role==='gestor'?'selected':''}>Gestor</option>
-            <option value="analista" ${user.role==='analista'?'selected':''}>Analista</option>
             <option value="viewer" ${user.role==='viewer'?'selected':''}>Visualizador</option>
           </select>
         </div>
@@ -338,7 +332,6 @@ function openAddModal() {
   document.getElementById('new-username').value = '';
   document.getElementById('new-pass').value = '';
   document.getElementById('new-email').value = '';
-  document.getElementById('new-role').value = 'gestor';
   document.getElementById('add-modal').classList.add('open');
 }
 function closeAddModal() { document.getElementById('add-modal').classList.remove('open'); }
