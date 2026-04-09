@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SARA — Sistema Para Acompanhamento Regional de Atuação Política</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;0,600;0,700;1,300&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/css/login.css">
+</head>
+<body>
+
+<!-- ════════════════ LOGIN SCREEN ════════════════ -->
+<div id="screen-login">
+
+  <!-- Left decorative panel -->
+  <div class="login-left">
+    <div class="login-brand">
+      <div class="wordmark">SARA</div>
+      <div class="tagline">Sistema Para Acompanhamento Regional de Atuação Política</div>
+    </div>
+
+    <div class="login-left-content">
+      <h2>Gestão pública<br>com transparência<br>e controle.</h2>
+      <p>Plataforma integrada para cadastro, acompanhamento e análise de mandatos políticos e demandas da sociedade.</p>
+      <div class="feature-list">
+        <div class="feature-item"><span class="feature-dot"></span>Cadastro completo de políticos e mandatos</div>
+        <div class="feature-item"><span class="feature-dot"></span>Controle de gastos e prestação de contas</div>
+        <div class="feature-item"><span class="feature-dot"></span>Verificação automática de elegibilidade</div>
+        <div class="feature-item"><span class="feature-dot"></span>Registro e acompanhamento de demandas públicas</div>
+        <div class="feature-item"><span class="feature-dot"></span>Relatórios e indicadores consolidados</div>
+      </div>
+    </div>
+
+    <div class="login-left-footer">
+      © 2026 SARA · Versão 2.8 · Uso interno restrito
+    </div>
+  </div>
+
+  <!-- Right: Login form -->
+  <div class="login-right">
+    <div class="login-card">
+      <div class="login-card-header">
+        <h3>Acesse sua conta</h3>
+        <p>Informe suas credenciais para entrar no sistema</p>
+      </div>
+      <div class="login-card-body">
+
+        <div class="form-group">
+          <label>Usuário</label>
+          <div class="input-wrap">
+            <span class="input-icon">👤</span>
+            <input type="text" id="login-user" placeholder="Seu nome de usuário" autocomplete="username">
+          </div>
+          <span class="error-msg" id="err-user">Usuário inválido ou não encontrado</span>
+        </div>
+
+        <div class="form-group">
+          <label>Senha</label>
+          <div class="input-wrap">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="login-pass" placeholder="Sua senha" autocomplete="current-password">
+            <button class="eye-btn" onclick="togglePass()" id="eye-btn" type="button">👁</button>
+          </div>
+          <span class="error-msg" id="err-pass">Senha incorreta. Tente novamente.</span>
+        </div>
+
+        <div class="login-options">
+          <label class="remember-label">
+            <input type="checkbox" id="remember"> Lembrar acesso
+          </label>
+          <span class="forgot-link" onclick="forgotPass()">Esqueci a senha</span>
+        </div>
+
+        <button class="btn-login" id="btn-login" onclick="doLogin()">
+          <div class="loader" id="login-loader"></div>
+          <span id="btn-login-text">Entrar no Sistema</span>
+        </button>
+
+        <br><br>
+
+        <div class="role-pills">
+          <div class="role-pill" onclick="fillDemo('admin')">Admin</div>
+          <div class="role-pill" onclick="fillDemo('viewer')">Visualizador</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ ADMIN PANEL ════════════════ -->
+<div id="screen-admin" style="display:none;flex-direction:column;">
+  <div class="admin-topbar">
+    <div class="brand">
+      SisGov
+      <span>Painel de Administração</span>
+    </div>
+    <div class="admin-topbar-right">
+      <span class="admin-user" id="admin-user-label">—</span>
+      <button class="btn-sm" onclick="goToSystem()">🏛 Ir para o Sistema</button>
+      <button class="btn-sm danger" onclick="doLogout()">Sair</button>
+    </div>
+  </div>
+
+  <div class="admin-body">
+    <!-- User list sidebar -->
+    <div class="admin-sidebar">
+      <div class="admin-sidebar-header">
+        <h2>Usuários do Sistema</h2>
+        <p id="user-count">— usuários cadastrados</p>
+      </div>
+      <div class="user-search">
+        <div class="search-wrap">
+          <input type="text" placeholder="Buscar usuário..." oninput="filterUsers(this.value)">
+        </div>
+      </div>
+      <div class="user-list" id="user-list"></div>
+      <button class="add-user-btn" onclick="openAddModal()">+ Adicionar Usuário</button>
+    </div>
+
+    <!-- Detail -->
+    <div class="admin-detail" id="admin-detail">
+      <div class="detail-empty">
+        <div class="big-icon">👥</div>
+        <p>Selecione um usuário para<br>visualizar e editar suas permissões</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ MODAL ADICIONAR USUÁRIO ════ -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Novo Usuário</div>
+      <button class="modal-close" onclick="closeAddModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-grid">
+        <div class="field-group" style="grid-column:span 2">
+          <label class="field-label">Nome Completo *</label>
+          <input class="field-input" type="text" id="new-name" placeholder="Ex: Carlos Andrade">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Nome de Usuário *</label>
+          <input class="field-input" type="text" id="new-username" placeholder="carlosandrade">
+        </div>
+        <div class="field-group">
+          <label class="field-label">Senha *</label>
+          <input class="field-input" type="password" id="new-pass" placeholder="Min. 6 caracteres, letras e números">
+          <span class="field-error" id="err-new-pass"></span>
+        </div>
+        <div class="field-group">
+          <label class="field-label">E-mail</label>
+          <input class="field-input" type="email" id="new-email" placeholder="usuario@gov.br">
+          <span class="field-error" id="err-new-email"></span>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Perfil de Acesso *</label>
+          <select class="field-select" id="new-role">
+            <option value="admin">Administrador</option>
+            <option value="viewer">Visualizador</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-outline" onclick="closeAddModal()">Cancelar</button>
+      <button class="btn-primary" onclick="saveNewUser()">Criar Usuário</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════ MODAL CONFIRMAR EXCLUSÃO ════ -->
+<div class="modal-overlay" id="del-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Confirmar Exclusão</div>
+      <button class="modal-close" onclick="closeDelModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:.9rem;color:var(--text-mid)">Tem certeza que deseja excluir o usuário <strong id="del-name-label"></strong>? Esta ação não pode ser desfeita.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-outline" onclick="closeDelModal()">Cancelar</button>
+      <button class="btn-danger" onclick="confirmDelete()">Excluir Usuário</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="src/js/utils.js"></script>
+<script src="src/js/login.js"></script>
+</body>
+</html>
