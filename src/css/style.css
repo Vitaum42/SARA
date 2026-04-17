@@ -589,7 +589,7 @@
     transition: box-shadow .18s;
   }
   .expense-row:hover { box-shadow: var(--shadow-sm); }
-  .expense-amount { font-family: 'Fraunces', serif; color: var(--green-800); font-weight: 600; }
+  .expense-amount { font-family: 'Fraunces', serif; color: var(--text-dark); font-weight: 600; }
   .expense-total {
     background: var(--green-800);
     color: var(--white);
