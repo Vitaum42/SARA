@@ -175,35 +175,17 @@
         <!-- PASSO 3 -->
         <div class="reg-section" id="rsec-3">
           <div class="reg-section-title">Credenciais de Acesso</div>
+
           <div class="reg-field-group">
             <label class="reg-label">Nome de Usuário <span class="req">*</span></label>
             <div class="reg-input-wrap">
               <span class="reg-input-prefix">@</span>
-              <input class="reg-input has-prefix" type="text" id="reg-username" placeholder="nome.usuario" autocomplete="username" oninput="slugifyUsername(this)">
+              <input class="reg-input has-prefix" type="text" id="reg-username" placeholder="ex: joao.silva" autocomplete="username" oninput="slugifyUsername(this)">
             </div>
-            <span class="reg-hint">Usado para login · apenas letras, números e pontos</span>
+            <span class="reg-hint">Escolha um nome único para fazer login · apenas letras, números e pontos</span>
             <span class="reg-error" id="rerr-username"></span>
           </div>
-          <div class="reg-field-group">
-            <label class="reg-label">Perfil de Acesso <span class="req">*</span></label>
-            <div class="reg-profile-grid">
-              <div class="reg-profile-card active" onclick="selectProfile(this,'viewer')" data-role="viewer">
-                <div class="reg-profile-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                </div>
-                <div class="reg-profile-name">Visualizador</div>
-                <div class="reg-profile-desc">Consulta e leitura de dados</div>
-              </div>
-              <div class="reg-profile-card" onclick="selectProfile(this,'admin')" data-role="admin">
-                <div class="reg-profile-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                </div>
-                <div class="reg-profile-name">Administrador</div>
-                <div class="reg-profile-desc">Gestão completa do sistema</div>
-              </div>
-            </div>
-            <span class="reg-error" id="rerr-perfil"></span>
-          </div>
+
           <div class="reg-field-group">
             <label class="reg-label">Senha <span class="req">*</span></label>
             <div class="reg-input-wrap">
@@ -216,6 +198,7 @@
             </div>
             <span class="reg-error" id="rerr-senha"></span>
           </div>
+
           <div class="reg-field-group">
             <label class="reg-label">Confirmar Senha <span class="req">*</span></label>
             <div class="reg-input-wrap">
@@ -224,6 +207,11 @@
             </div>
             <span class="reg-error" id="rerr-senha2"></span>
           </div>
+
+          <div class="reg-role-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>Novas contas são criadas com perfil <strong>Visualizador</strong>. Para acesso de Administrador, solicite ao responsável do sistema.</span>
+          </div>
         </div>
 
         <!-- SUCESSO -->
@@ -231,15 +219,11 @@
 
         <!-- Navegação -->
         <div class="reg-nav" id="reg-nav">
-          <button class="btn-outline reg-btn-back" id="reg-btn-back" onclick="regBack()" style="visibility:hidden">← Voltar</button>
+          <button class="btn-login reg-btn-back reg-btn-secondary" id="reg-btn-back" onclick="regBack()">← Voltar</button>
           <button class="btn-login reg-btn-next" id="reg-btn-next" onclick="regNext()">
             <div class="loader" id="reg-loader" style="display:none"></div>
             <span id="reg-btn-text">Próximo →</span>
           </button>
-        </div>
-
-        <div class="register-back-link" id="reg-back-link">
-          <button type="button" onclick="closeRegisterScreen()">← Voltar para o login</button>
         </div>
 
       </div>
