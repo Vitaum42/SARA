@@ -1,5 +1,35 @@
   const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
 
+  // ─── Guarda de Autenticação ──────────────────────────────────────────────
+  (function checkAuth() {
+    const stored = sessionStorage.getItem('saraCurrentUser');
+    if (!stored) {
+      window.location.href = 'index.html';
+      return;
+    }
+    try {
+      const user = JSON.parse(stored);
+      // VIEWER não pode acessar painel admin — mas pode estar aqui normalmente
+      // Ocultar itens de menu que requerem permissão admin
+      if (user.role !== 'admin') {
+        // Esconde itens de navegação restritos a admin
+        const adminNavItems = ['register', 'expenses', 'demands', 'reports'];
+        adminNavItems.forEach(key => {
+          const navEl = document.querySelector(`[onclick*="navigate('${key}'"]`);
+          if (navEl) navEl.style.display = 'none';
+        });
+        // Esconde botões de ação que requerem edição
+        document.querySelectorAll('.btn-primary, .btn-outline[onclick*="openModal"], .btn-outline[onclick*="navigate"]').forEach(btn => {
+          const txt = btn.textContent || '';
+          if (txt.includes('Cadastrar') || txt.includes('Nova Demanda') || txt.includes('+ ')) {
+            btn.style.display = 'none';
+          }
+        });
+      }
+    } catch(e) { window.location.href = 'index.html'; }
+  })();
+
+
   // ─── Topbar: data/hora atualizada ─────────────────────────────────────────
   function atualizarDateTime() {
     const el = document.getElementById('topbar-datetime');
@@ -138,18 +168,18 @@
   function loadSidebarUser() {
     try {
       const stored = sessionStorage.getItem('saraCurrentUser');
-      if (!stored) return;
+      if (!stored) { window.location.href = 'index.html'; return; }
       const user = JSON.parse(stored);
       const initials = user.name.split(' ').slice(0,2).map(n => n[0]).join('').toUpperCase();
       document.getElementById('sidebar-avatar').textContent = initials;
       document.getElementById('sidebar-user-name').textContent = user.name;
       document.getElementById('sidebar-user-role').textContent = ROLE_LABELS_HOME[user.role] || user.role;
-    } catch(e) {}
+    } catch(e) { window.location.href = 'index.html'; }
   }
 
   function sidebarLogout() {
     sessionStorage.removeItem('saraCurrentUser');
-    window.location.href = 'login.html';
+    window.location.href = 'index.html';
   }
 
   loadSidebarUser();

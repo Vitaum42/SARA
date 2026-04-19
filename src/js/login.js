@@ -1,74 +1,135 @@
-// ══════════════════════════════════════════
-// DATA — users store (com persistência localStorage)
-// ══════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// SARA — Login, Registro & Painel de Administração
+// Banco de dados: IndexedDB (database.js) | Senhas: SHA-256
+// Acessos: ADMIN (painel + sistema) | VIEWER (somente sistema)
+// ══════════════════════════════════════════════════════════════════════
+
+// ─── Configuração de Permissões ─────────────────────────────────────
 const PERMISSIONS_LIST = [
-  { key: 'view_dashboard',   label: 'Painel Geral',       desc: 'Visualizar estatísticas' },
-  { key: 'view_politicians', label: 'Ver Políticos',       desc: 'Listar e buscar' },
-  { key: 'edit_politicians', label: 'Editar Políticos',    desc: 'Cadastrar e alterar' },
-  { key: 'view_expenses',    label: 'Ver Gastos',          desc: 'Consultar despesas' },
-  { key: 'edit_expenses',    label: 'Lançar Gastos',       desc: 'Inserir e editar' },
-  { key: 'view_eligibility', label: 'Elegibilidade',       desc: 'Verificar critérios' },
-  { key: 'view_demands',     label: 'Ver Demandas',        desc: 'Listar demandas' },
-  { key: 'edit_demands',     label: 'Registrar Demandas',  desc: 'Criar e atualizar' },
-  { key: 'reports',          label: 'Relatórios',          desc: 'Gerar relatórios' },
-  { key: 'admin',            label: 'Administração',       desc: 'Gerenciar usuários' },
+  { key: 'view_dashboard',   label: 'Painel Geral',      desc: 'Visualizar estatísticas' },
+  { key: 'view_politicians', label: 'Ver Políticos',      desc: 'Listar e buscar' },
+  { key: 'edit_politicians', label: 'Editar Políticos',   desc: 'Cadastrar e alterar' },
+  { key: 'view_expenses',    label: 'Ver Gastos',         desc: 'Consultar despesas' },
+  { key: 'edit_expenses',    label: 'Lançar Gastos',      desc: 'Inserir e editar' },
+  { key: 'view_eligibility', label: 'Elegibilidade',      desc: 'Verificar critérios' },
+  { key: 'view_demands',     label: 'Ver Demandas',       desc: 'Listar demandas' },
+  { key: 'edit_demands',     label: 'Editar Demandas',    desc: 'Criar e atualizar' },
+  { key: 'reports',          label: 'Relatórios',         desc: 'Gerar relatórios' },
+  { key: 'admin',            label: 'Administração',      desc: 'Gerenciar usuários' },
 ];
 
 const ROLE_DEFAULTS = {
-  admin:    ['view_dashboard','view_politicians','edit_politicians','view_expenses','edit_expenses','view_eligibility','view_demands','edit_demands','reports','admin'],
-  viewer:   ['view_dashboard','view_politicians','view_expenses','view_eligibility','view_demands'],
+  admin:  ['view_dashboard','view_politicians','edit_politicians','view_expenses',
+           'edit_expenses','view_eligibility','view_demands','edit_demands','reports','admin'],
+  viewer: ['view_dashboard','view_politicians','view_expenses','view_eligibility','view_demands'],
 };
 
-const ROLE_LABELS = { admin:'Administrador', viewer:'Visualizador' };
+// Permissões que VIEWER não tem (escondidas no sistema)
+const ADMIN_ONLY_PERMS = ['edit_politicians','edit_expenses','edit_demands','reports','admin'];
+const ADMIN_ONLY_NAV   = ['register','expenses','demands','reports']; // nav items ocultos para viewer
 
-// Senhas padrão com hash SHA-256 (admin123, viewer123)
-const DEFAULT_HASHED_PASSWORDS = {
-  'admin123': '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
-  'viewer123': '65375049b9e4d7cad6c9ba286fdeb9394b28135a3e84136404cfccfdcc438894'
-};
+const ROLE_LABELS = { admin: 'Administrador', viewer: 'Visualizador' };
 
-// Carrega usuários do localStorage ou usa os padrão
-const USUARIOS_PADRAO = [
-  { id:1, name:'Administrador do Sistema', username:'admin',    passwordHash:'240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', email:'admin@sisgov.br',    role:'admin',    active:true,  lastLogin:'Hoje, 09:14', createdAt:'01/01/2025', permissions:[...ROLE_DEFAULTS.admin] },
-  { id:4, name:'Visualizador Público',     username:'viewer',   passwordHash:'65375049b9e4d7cad6c9ba286fdeb9394b28135a3e84136404cfccfdcc438894', email:'viewer@sisgov.br',   role:'viewer',   active:true, lastLogin:'05/03/2025',  createdAt:'01/02/2025', permissions:[...ROLE_DEFAULTS.viewer] },
-];
-
-let users = carregarDoStorage(STORAGE_KEYS.USERS) || [...USUARIOS_PADRAO];
-let nextId = carregarDoStorage(STORAGE_KEYS.NEXT_ID) || 5;
+// ─── Estado ─────────────────────────────────────────────────────────
+let currentUser    = null;
 let selectedUserId = null;
 let deleteTargetId = null;
-let currentUser = null;
+let _allUsers      = [];
+let _regStep       = 1;
+let _regRole       = 'viewer';
 
-function persistirUsuarios() {
-  salvarNoStorage(STORAGE_KEYS.USERS, users);
-  salvarNoStorage(STORAGE_KEYS.NEXT_ID, nextId);
+// ─── Boot: inicializa DB ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await dbInit();
+    await dbSeedAdmin();
+  } catch (e) {
+    console.error('[SARA] Erro ao inicializar banco:', e);
+    showToast('Erro ao inicializar banco de dados. Recarregue a página.', true);
+  }
+});
+
+// ══════════════════════════════════════════
+// UTILITÁRIOS
+// ══════════════════════════════════════════
+function getInitials(name) {
+  return (name || '').split(' ').slice(0,2).map(n => n[0]).join('').toUpperCase() || '?';
+}
+
+function calcularIdade(dataNasc) {
+  const hoje = new Date();
+  const nasc = new Date(dataNasc + 'T00:00:00');
+  let idade = hoje.getFullYear() - nasc.getFullYear();
+  const m = hoje.getMonth() - nasc.getMonth();
+  if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade--;
+  return { idade, maior: idade >= 18 };
+}
+
+function mascaraCPFInput(input) {
+  let v = input.value.replace(/\D/g,'').slice(0,11);
+  v = v.replace(/(\d{3})(\d)/,'$1.$2')
+       .replace(/(\d{3})(\d)/,'$1.$2')
+       .replace(/(\d{3})(\d{1,2})$/,'$1-$2');
+  input.value = v;
+}
+
+function mascaraTelefoneInput(input) {
+  let v = input.value.replace(/\D/g,'').slice(0,11);
+  if (v.length <= 10) v = v.replace(/(\d{2})(\d)/,'($1) $2').replace(/(\d{4})(\d)/,'$1-$2');
+  else                v = v.replace(/(\d{2})(\d)/,'($1) $2').replace(/(\d{5})(\d)/,'$1-$2');
+  input.value = v;
+}
+
+function slugifyUsername(input) {
+  input.value = input.value.toLowerCase()
+    .replace(/\s+/g,'.').replace(/[^a-z0-9.]/g,'');
+}
+
+function showToast(msg, isError = false) {
+  const c = document.getElementById('toast-container');
+  if (!c) return;
+  const t = document.createElement('div');
+  t.className = 'toast' + (isError ? ' error' : '');
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 3800);
+}
+
+async function reloadUsers() {
+  _allUsers = await dbGetAllUsers();
+}
+
+function ageBadgeHTML(maior, idade) {
+  return maior
+    ? `<span class="age-tag maior">✓ Maior de idade · ${idade} anos</span>`
+    : `<span class="age-tag menor">⚠ Menor de idade · ${idade} anos</span>`;
 }
 
 // ══════════════════════════════════════════
 // LOGIN
 // ══════════════════════════════════════════
-function fillDemo(role) {
-  document.querySelectorAll('.role-pill').forEach(p => p.classList.remove('selected'));
-  event.target.classList.add('selected');
-  const demoCredentials = { admin: { user: 'admin', pass: 'admin123' }, viewer: { user: 'viewer', pass: 'viewer123' } };
-  const cred = demoCredentials[role];
-  if (cred) {
-    document.getElementById('login-user').value = cred.user;
-    document.getElementById('login-pass').value = cred.pass;
+function togglePass() {
+  const inp  = document.getElementById('login-pass');
+  const show = document.getElementById('eye-open');
+  const hide = document.getElementById('eye-closed');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    if (show) show.style.display = 'none';
+    if (hide) hide.style.display = '';
+  } else {
+    inp.type = 'password';
+    if (show) show.style.display = '';
+    if (hide) hide.style.display = 'none';
   }
 }
 
-function togglePass() {
-  const inp = document.getElementById('login-pass');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
-}
-
 function forgotPass() {
-  showToast('Contate o administrador do sistema para redefinir sua senha.', false);
+  showToast('Contate o administrador do sistema para redefinir sua senha.');
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && document.getElementById('screen-login').style.display !== 'none') doLogin();
+  const ls = document.getElementById('screen-login');
+  if (e.key === 'Enter' && ls && ls.style.display !== 'none') doLogin();
 });
 
 async function doLogin() {
@@ -80,54 +141,70 @@ async function doLogin() {
   const loader = document.getElementById('login-loader');
   const btnTxt = document.getElementById('btn-login-text');
 
-  // reset
+  // Reset visual
   [uInput, pInput].forEach(i => i.classList.remove('error'));
-  [errU, errP].forEach(e => e.classList.remove('show'));
+  [errU, errP].forEach(e => { e.textContent = ''; e.classList.remove('show'); });
 
   const username = uInput.value.trim();
   const password = pInput.value;
 
-  if (!username) { uInput.classList.add('error'); errU.textContent = 'Preencha o nome de usuário.'; errU.classList.add('show'); uInput.focus(); return; }
-  if (!password) { pInput.classList.add('error'); errP.textContent = 'Preencha a senha.'; errP.classList.add('show'); pInput.focus(); return; }
+  if (!username) {
+    uInput.classList.add('error');
+    errU.textContent = 'Preencha o nome de usuário.';
+    errU.classList.add('show');
+    uInput.focus(); return;
+  }
+  if (!password) {
+    pInput.classList.add('error');
+    errP.textContent = 'Preencha a senha.';
+    errP.classList.add('show');
+    pInput.focus(); return;
+  }
 
-  // simulate async
   btn.disabled = true;
-  loader.style.display = 'block';
+  loader.style.display = 'inline-block';
   btnTxt.textContent = 'Verificando...';
 
-  // Hash da senha para comparar
-  const senhaHash = await hashSenha(password);
+  try {
+    const senhaHash = await hashSenha(password);
+    const user      = await dbGetUserByUsername(username);
 
-  setTimeout(() => {
-    const user = users.find(u => u.username === username && u.passwordHash === senhaHash);
-
-    if (!user) {
-      loader.style.display = 'none';
-      btnTxt.textContent = 'Entrar no Sistema';
-      btn.disabled = false;
-      const exists = users.find(u => u.username === username);
-      if (!exists) { uInput.classList.add('error'); errU.classList.add('show'); errU.textContent = 'Usuário não encontrado.'; }
-      else { pInput.classList.add('error'); errP.classList.add('show'); }
-      document.querySelector('.login-card').classList.add('shake');
-      setTimeout(() => document.querySelector('.login-card').classList.remove('shake'), 400);
+    if (!user || user.passwordHash !== senhaHash) {
+      loader.style.display = 'none'; btnTxt.textContent = 'Entrar no Sistema'; btn.disabled = false;
+      if (!user) {
+        uInput.classList.add('error'); errU.textContent = 'Usuário não encontrado.'; errU.classList.add('show');
+      } else {
+        pInput.classList.add('error'); errP.textContent = 'Senha incorreta. Tente novamente.'; errP.classList.add('show');
+      }
+      const card = document.querySelector('#screen-login .login-card');
+      card.classList.add('shake');
+      setTimeout(() => card.classList.remove('shake'), 400);
       return;
     }
+
     if (!user.active) {
-      loader.style.display = 'none';
-      btnTxt.textContent = 'Entrar no Sistema';
-      btn.disabled = false;
+      loader.style.display = 'none'; btnTxt.textContent = 'Entrar no Sistema'; btn.disabled = false;
       uInput.classList.add('error');
-      errU.textContent = 'Este usuário está desativado. Contate o administrador.';
-      errU.classList.add('show');
-      return;
+      errU.textContent = 'Conta desativada. Contate o administrador.';
+      errU.classList.add('show'); return;
     }
 
-    user.lastLogin = 'Agora mesmo';
+    // Atualiza lastLogin
+    user.lastLogin = new Date().toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' });
+    await dbUpdateUser(user);
     currentUser = user;
-    persistirUsuarios();
-    sessionStorage.setItem('saraCurrentUser', JSON.stringify({ name: user.name, username: user.username, role: user.role, email: user.email }));
-    btnTxt.textContent = 'Acesso autorizado';
 
+    // Salva sessão
+    sessionStorage.setItem('saraCurrentUser', JSON.stringify({
+      id: user.id, name: user.name, username: user.username,
+      role: user.role, email: user.email, permissions: user.permissions,
+    }));
+
+    btnTxt.textContent = 'Acesso autorizado ✓';
+
+    // Redireciona conforme perfil:
+    // ADMIN  → painel de administração (gerenciar usuários)
+    // VIEWER → sistema diretamente (sem painel admin)
     setTimeout(() => {
       document.getElementById('screen-login').style.display = 'none';
       if (user.role === 'admin') {
@@ -135,17 +212,337 @@ async function doLogin() {
       } else {
         goToSystem();
       }
-    }, 600);
-  }, 900);
+    }, 500);
+
+  } catch (err) {
+    console.error('[SARA] Erro no login:', err);
+    loader.style.display = 'none'; btnTxt.textContent = 'Entrar no Sistema'; btn.disabled = false;
+    showToast('Erro interno. Tente novamente.', true);
+  }
 }
 
 // ══════════════════════════════════════════
-// NAVIGATION
+// CADASTRO DE NOVO USUÁRIO (3 passos)
 // ══════════════════════════════════════════
-function openAdminPanel() {
-  const panel = document.getElementById('screen-admin');
-  panel.style.display = 'flex';
-  document.getElementById('admin-user-label').textContent = escapeHtml(currentUser.name) + ' (' + ROLE_LABELS[currentUser.role] + ')';
+function openRegisterScreen() {
+  document.getElementById('screen-login').style.display = 'none';
+  document.getElementById('screen-register').style.display = 'flex';
+  resetRegisterForm();
+}
+
+function closeRegisterScreen() {
+  document.getElementById('screen-register').style.display = 'none';
+  document.getElementById('screen-login').style.display = 'flex';
+}
+
+function resetRegisterForm() {
+  _regStep = 1;
+  _regRole = 'viewer';
+
+  ['reg-nome','reg-sobrenome','reg-cpf','reg-email','reg-telefone',
+   'reg-username','reg-senha','reg-senha2'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const nasc = document.getElementById('reg-nascimento');
+  if (nasc) { nasc.value = ''; nasc.max = new Date().toISOString().split('T')[0]; }
+
+  document.querySelectorAll('#screen-register .reg-error').forEach(e => {
+    e.textContent = ''; e.style.display = 'none';
+  });
+
+  const badge = document.getElementById('reg-age-badge');
+  if (badge) badge.style.display = 'none';
+
+  const sw = document.getElementById('reg-strength-wrap');
+  if (sw) sw.style.display = 'none';
+
+  // Reseta perfil selecionado para viewer
+  document.querySelectorAll('.reg-profile-card').forEach(c => c.classList.remove('active'));
+  const vc = document.querySelector('.reg-profile-card[data-role="viewer"]');
+  if (vc) vc.classList.add('active');
+
+  // Mostra nav e back-link
+  const nav = document.getElementById('reg-nav');
+  if (nav) nav.style.display = '';
+  const bl = document.getElementById('reg-back-link');
+  if (bl) bl.style.display = '';
+
+  goToRegStep(1);
+}
+
+function goToRegStep(step) {
+  _regStep = step;
+  for (let i = 1; i <= 3; i++) {
+    const sec = document.getElementById('rsec-' + i);
+    const ind = document.getElementById('rstep-' + i);
+    if (sec) sec.classList.toggle('active', i === step);
+    if (ind) {
+      ind.classList.toggle('active', i === step);
+      ind.classList.toggle('done', i < step);
+    }
+  }
+  const back  = document.getElementById('reg-btn-back');
+  const nBtn  = document.getElementById('reg-btn-next');
+  const nTxt  = document.getElementById('reg-btn-text');
+  const ldr   = document.getElementById('reg-loader');
+  if (back) back.style.visibility = step > 1 ? 'visible' : 'hidden';
+  if (nBtn) nBtn.disabled = false;
+  if (ldr)  ldr.style.display = 'none';
+  if (nTxt) nTxt.textContent = step === 3 ? 'Criar Conta' : 'Próximo →';
+}
+
+// ── Máscaras ─────────────────────────────
+function maskCPFReg(input) { mascaraCPFInput(input); }
+function maskTelReg(input)  { mascaraTelefoneInput(input); }
+
+// ── Badge de maioridade ──────────────────
+function checkAge() {
+  const val   = document.getElementById('reg-nascimento')?.value;
+  const badge = document.getElementById('reg-age-badge');
+  if (!badge) return;
+  if (!val)   { badge.style.display = 'none'; return; }
+  const { idade, maior } = calcularIdade(val);
+  badge.innerHTML      = ageBadgeHTML(maior, idade);
+  badge.style.display  = 'block';
+}
+
+function checkModalAge() {
+  const val   = document.getElementById('new-nascimento')?.value;
+  const badge = document.getElementById('new-age-badge');
+  if (!badge) return;
+  if (!val)   { badge.style.display = 'none'; return; }
+  const { idade, maior } = calcularIdade(val);
+  badge.innerHTML     = ageBadgeHTML(maior, idade);
+  badge.style.display = 'block';
+}
+
+// ── Força de senha ───────────────────────
+function checkPasswordStrength(val) {
+  const wrap  = document.getElementById('reg-strength-wrap');
+  const fill  = document.getElementById('reg-strength-fill');
+  const label = document.getElementById('reg-strength-label');
+  if (!fill || !label) return;
+  if (!val) { if (wrap) wrap.style.display = 'none'; return; }
+  if (wrap) wrap.style.display = 'flex';
+  let score = 0;
+  if (val.length >= 6)           score++;
+  if (val.length >= 10)          score++;
+  if (/[A-Z]/.test(val))         score++;
+  if (/\d/.test(val))            score++;
+  if (/[^A-Za-z0-9]/.test(val)) score++;
+  const levels = [
+    { w:'20%',  c:'#ef4444', t:'Muito fraca' },
+    { w:'40%',  c:'#f97316', t:'Fraca'       },
+    { w:'60%',  c:'#eab308', t:'Razoável'    },
+    { w:'80%',  c:'#84cc16', t:'Boa'         },
+    { w:'100%', c:'#22c55e', t:'Forte'       },
+  ];
+  const lv = levels[Math.min(score-1, 4)] || levels[0];
+  fill.style.width      = lv.w;
+  fill.style.background = lv.c;
+  label.textContent     = lv.t;
+  label.style.color     = lv.c;
+}
+
+function toggleRegPass(id) {
+  const inp = document.getElementById(id);
+  if (inp) inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function selectProfile(el, role) {
+  _regRole = role;
+  document.querySelectorAll('.reg-profile-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ── Validadores por passo ────────────────
+function regSetErr(id, msg) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+function regClearErr(id) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = ''; el.style.display = 'none'; }
+}
+
+async function validateStep1() {
+  const nome      = document.getElementById('reg-nome')?.value.trim();
+  const sobrenome = document.getElementById('reg-sobrenome')?.value.trim();
+  const cpf       = document.getElementById('reg-cpf')?.value.replace(/\D/g,'');
+  const nasc      = document.getElementById('reg-nascimento')?.value;
+
+  ['rerr-nome','rerr-sobrenome','rerr-cpf','rerr-nascimento'].forEach(regClearErr);
+  let ok = true;
+
+  if (!nome)      { regSetErr('rerr-nome', 'Informe seu nome.'); ok = false; }
+  if (!sobrenome) { regSetErr('rerr-sobrenome', 'Informe seu sobrenome.'); ok = false; }
+  if (!nasc)      { regSetErr('rerr-nascimento', 'Informe a data de nascimento.'); ok = false; }
+  else {
+    const { idade } = calcularIdade(nasc);
+    if (idade < 0 || idade > 130) { regSetErr('rerr-nascimento', 'Data inválida.'); ok = false; }
+  }
+  if (!cpf || cpf.length !== 11) {
+    regSetErr('rerr-cpf', 'CPF deve ter 11 dígitos.'); ok = false;
+  } else if (!validarCPF(cpf)) {
+    regSetErr('rerr-cpf', 'CPF inválido. Verifique os dígitos.'); ok = false;
+  } else {
+    const todos = await dbGetAllUsers();
+    if (todos.find(u => (u.cpf||'').replace(/\D/g,'') === cpf)) {
+      regSetErr('rerr-cpf', 'CPF já cadastrado no sistema.'); ok = false;
+    }
+  }
+  return ok;
+}
+
+async function validateStep2() {
+  const email = document.getElementById('reg-email')?.value.trim();
+  const tel   = document.getElementById('reg-telefone')?.value;
+  ['rerr-email','rerr-telefone'].forEach(regClearErr);
+  let ok = true;
+
+  if (!email || !validarEmail(email)) {
+    regSetErr('rerr-email', 'Informe um e-mail válido.'); ok = false;
+  } else {
+    const todos = await dbGetAllUsers();
+    if (todos.find(u => u.email === email)) {
+      regSetErr('rerr-email', 'E-mail já cadastrado no sistema.'); ok = false;
+    }
+  }
+  if (!tel || !validarTelefone(tel)) {
+    regSetErr('rerr-telefone', 'Informe um telefone válido com DDD.'); ok = false;
+  }
+  return ok;
+}
+
+async function validateStep3() {
+  const username = document.getElementById('reg-username')?.value.trim();
+  const senha    = document.getElementById('reg-senha')?.value;
+  const senha2   = document.getElementById('reg-senha2')?.value;
+  ['rerr-username','rerr-perfil','rerr-senha','rerr-senha2'].forEach(regClearErr);
+  let ok = true;
+
+  if (!username || username.length < 3) {
+    regSetErr('rerr-username', 'Nome de usuário deve ter ao menos 3 caracteres.'); ok = false;
+  } else {
+    const dup = await dbGetUserByUsername(username);
+    if (dup) { regSetErr('rerr-username', 'Nome de usuário já está em uso.'); ok = false; }
+  }
+  const sc = validarSenhaForte(senha);
+  if (!sc.valido) { regSetErr('rerr-senha', sc.msg); ok = false; }
+  if (senha !== senha2) { regSetErr('rerr-senha2', 'As senhas não conferem.'); ok = false; }
+  return ok;
+}
+
+// ── Navegação ────────────────────────────
+async function regNext() {
+  if (_regStep === 1) { const ok = await validateStep1(); if (!ok) return; }
+  if (_regStep === 2) { const ok = await validateStep2(); if (!ok) return; }
+  if (_regStep === 3) { await submitRegister(); return; }
+
+  // Ao chegar no passo 3: sugere username automaticamente
+  if (_regStep === 2) {
+    const uEl = document.getElementById('reg-username');
+    if (uEl && !uEl.value) {
+      const n = document.getElementById('reg-nome')?.value.trim() || '';
+      const s = document.getElementById('reg-sobrenome')?.value.trim() || '';
+      uEl.value = (n + '.' + s).toLowerCase().replace(/\s+/g,'.').replace(/[^a-z0-9.]/g,'');
+    }
+  }
+  goToRegStep(_regStep + 1);
+}
+
+function regBack() {
+  if (_regStep > 1) goToRegStep(_regStep - 1);
+}
+
+async function submitRegister() {
+  const ok = await validateStep3();
+  if (!ok) return;
+
+  const nBtn  = document.getElementById('reg-btn-next');
+  const ldr   = document.getElementById('reg-loader');
+  const nTxt  = document.getElementById('reg-btn-text');
+  if (nBtn) nBtn.disabled = true;
+  if (ldr)  ldr.style.display = 'inline-block';
+  if (nTxt) nTxt.textContent  = 'Criando conta...';
+
+  try {
+    const nome       = document.getElementById('reg-nome')?.value.trim();
+    const sobrenome  = document.getElementById('reg-sobrenome')?.value.trim();
+    const cpf        = document.getElementById('reg-cpf')?.value;
+    const nascimento = document.getElementById('reg-nascimento')?.value;
+    const email      = document.getElementById('reg-email')?.value.trim();
+    const telefone   = document.getElementById('reg-telefone')?.value;
+    const username   = document.getElementById('reg-username')?.value.trim();
+    const senha      = document.getElementById('reg-senha')?.value;
+
+    const { idade, maior: maiorDeIdade } = calcularIdade(nascimento);
+    const passwordHash = await hashSenha(senha);
+
+    await dbCreateUser({
+      nome, sobrenome,
+      name: nome + ' ' + sobrenome,
+      username, email, telefone, cpf, nascimento, idade, maiorDeIdade,
+      passwordHash,
+      role:         _regRole,
+      active:       true,
+      isAdminMaster: false,
+      lastLogin:    'Nunca',
+      createdAt:    new Date().toLocaleDateString('pt-BR'),
+      permissions:  [...ROLE_DEFAULTS[_regRole]],
+    });
+
+    showRegisterSuccess({ nome, sobrenome, username, email, cpf, idade, maiorDeIdade, role: _regRole });
+
+  } catch (err) {
+    console.error('[SARA] Erro ao cadastrar:', err);
+    if (nBtn) nBtn.disabled = false;
+    if (ldr)  ldr.style.display = 'none';
+    if (nTxt) nTxt.textContent  = 'Criar Conta';
+    showToast('Erro ao criar conta. Tente novamente.', true);
+  }
+}
+
+function showRegisterSuccess(data) {
+  // Oculta passos, nav e back-link
+  for (let i = 1; i <= 3; i++) {
+    const s = document.getElementById('rsec-' + i); if (s) s.classList.remove('active');
+    const d = document.getElementById('rstep-' + i); if (d) { d.classList.remove('active'); d.classList.add('done'); }
+  }
+  const nav = document.getElementById('reg-nav');    if (nav) nav.style.display = 'none';
+  const bl  = document.getElementById('reg-back-link'); if (bl)  bl.style.display = 'none';
+
+  const sc = document.getElementById('rsec-success');
+  if (!sc) return;
+
+  sc.innerHTML = `
+    <div class="reg-success">
+      <div class="reg-success-icon">✓</div>
+      <h3>Conta criada com sucesso!</h3>
+      <p>Seus dados foram registrados no banco de dados.<br>Você já pode fazer login no sistema.</p>
+      <div class="reg-success-card">
+        <div class="rsc-row"><span class="rsc-label">Nome</span><span class="rsc-val">${escapeHtml(data.nome + ' ' + data.sobrenome)}</span></div>
+        <div class="rsc-row"><span class="rsc-label">Usuário</span><span class="rsc-val"><code>@${escapeHtml(data.username)}</code></span></div>
+        <div class="rsc-row"><span class="rsc-label">E-mail</span><span class="rsc-val">${escapeHtml(data.email)}</span></div>
+        <div class="rsc-row"><span class="rsc-label">CPF</span><span class="rsc-val">${escapeHtml(data.cpf)} ${ageBadgeHTML(data.maiorDeIdade, data.idade)}</span></div>
+        <div class="rsc-row"><span class="rsc-label">Perfil</span><span class="rsc-val"><strong>${data.role === 'admin' ? 'Administrador' : 'Visualizador'}</strong></span></div>
+      </div>
+      <button class="btn-login" onclick="closeRegisterScreen()" style="margin-top:22px;width:100%;justify-content:center">
+        Ir para o Login
+      </button>
+    </div>
+  `;
+  sc.classList.add('active');
+}
+
+// ══════════════════════════════════════════
+// NAVEGAÇÃO GLOBAL
+// ══════════════════════════════════════════
+async function openAdminPanel() {
+  document.getElementById('screen-admin').style.display = 'flex';
+  document.getElementById('admin-user-label').textContent =
+    escapeHtml(currentUser.name) + ' (' + ROLE_LABELS[currentUser.role] + ')';
+  await reloadUsers();
   renderUserList();
 }
 
@@ -154,304 +551,332 @@ function goToSystem() {
 }
 
 function doLogout() {
-  currentUser = null;
-  selectedUserId = null;
+  currentUser = null; selectedUserId = null; _allUsers = [];
   sessionStorage.removeItem('saraCurrentUser');
+
   document.getElementById('screen-admin').style.display = 'none';
   document.getElementById('screen-login').style.display = 'flex';
+
   document.getElementById('login-user').value = '';
   document.getElementById('login-pass').value = '';
   document.getElementById('btn-login').disabled = false;
   document.getElementById('login-loader').style.display = 'none';
   document.getElementById('btn-login-text').textContent = 'Entrar no Sistema';
-  document.querySelectorAll('.role-pill').forEach(p => p.classList.remove('selected'));
-  document.getElementById('admin-detail').innerHTML = '<div class="detail-empty"><div class="big-icon">👥</div><p>Selecione um usuário para<br>visualizar e editar suas permissões</p></div>';
+
+  // Reset olho
+  const eo = document.getElementById('eye-open');   if (eo) eo.style.display = '';
+  const ec = document.getElementById('eye-closed'); if (ec) ec.style.display = 'none';
+
+  const detail = document.getElementById('admin-detail');
+  if (detail) detail.innerHTML = '<div class="detail-empty"><div class="big-icon">👥</div><p>Selecione um usuário para<br>visualizar e editar suas informações</p></div>';
 }
 
 // ══════════════════════════════════════════
-// USER LIST (com sanitização XSS)
+// PAINEL ADMIN — LISTA DE USUÁRIOS
 // ══════════════════════════════════════════
-function getInitials(name) { return name.split(' ').slice(0,2).map(n=>n[0]).join('').toUpperCase(); }
-
-function renderUserList(filter='') {
+function renderUserList(filter = '') {
   const list = document.getElementById('user-list');
-  const filtered = users.filter(u => u.name.toLowerCase().includes(filter.toLowerCase()) || u.username.toLowerCase().includes(filter.toLowerCase()));
-  document.getElementById('user-count').textContent = users.length + ' usuário' + (users.length !== 1 ? 's' : '') + ' cadastrado' + (users.length !== 1 ? 's' : '');
+  if (!list) return;
+  const f = filter.toLowerCase();
+  const filtered = _allUsers.filter(u =>
+    (u.name||'').toLowerCase().includes(f) ||
+    (u.username||'').toLowerCase().includes(f) ||
+    (u.email||'').toLowerCase().includes(f)
+  );
+  const cnt = document.getElementById('user-count');
+  if (cnt) cnt.textContent = _allUsers.length + ' usuário' + (_allUsers.length !== 1 ? 's' : '') + ' cadastrado' + (_allUsers.length !== 1 ? 's' : '');
+
   list.innerHTML = filtered.map(u => `
     <div class="user-item ${u.id === selectedUserId ? 'active' : ''}" onclick="selectUser(${u.id})">
       <div class="user-avatar avatar-${escapeHtml(u.role)}">${escapeHtml(getInitials(u.name))}</div>
       <div class="user-item-info">
-        <div class="user-item-name">${escapeHtml(u.name)}</div>
-        <div class="user-item-role">${ROLE_LABELS[u.role] || escapeHtml(u.role)} · @${escapeHtml(u.username)}</div>
+        <div class="user-item-name">${escapeHtml(u.name)}${u.isAdminMaster ? ' <span class="master-badge">MASTER</span>' : ''}</div>
+        <div class="user-item-role">${ROLE_LABELS[u.role]||escapeHtml(u.role)} · @${escapeHtml(u.username)}</div>
       </div>
-      <div class="user-status-dot ${u.active ? 'dot-active' : 'dot-inactive'}" title="${u.active ? 'Ativo' : 'Inativo'}"></div>
+      <div class="user-status-dot ${u.active?'dot-active':'dot-inactive'}" title="${u.active?'Ativo':'Inativo'}"></div>
     </div>
-  `).join('');
+  `).join('') || '<div style="padding:20px;text-align:center;font-size:.82rem;color:#999">Nenhum usuário encontrado</div>';
 }
 
 function filterUsers(val) { renderUserList(val); }
-
-function selectUser(id) {
-  selectedUserId = id;
-  renderUserList(document.querySelector('.user-search input').value);
-  renderDetail();
-}
+function selectUser(id)   { selectedUserId = id; renderUserList(document.querySelector('.user-search input')?.value||''); renderDetail(); }
 
 // ══════════════════════════════════════════
-// DETAIL PANEL (com sanitização XSS)
+// PAINEL ADMIN — DETALHE / EDIÇÃO
 // ══════════════════════════════════════════
 function renderDetail() {
-  const user = users.find(u => u.id === selectedUserId);
+  const user = _allUsers.find(u => u.id === selectedUserId);
   if (!user) return;
+  const isSelf   = currentUser && user.id === currentUser.id;
+  const isMaster = !!user.isAdminMaster;
+
+  const nascBadge = user.nascimento
+    ? ageBadgeHTML(user.maiorDeIdade, user.idade || '?')
+    : '';
 
   const permsHtml = PERMISSIONS_LIST.map(p => {
-    const has = user.permissions.includes(p.key);
-    return `
-      <div class="perm-item ${has ? 'checked' : ''}" onclick="togglePerm(${user.id},'${escapeHtml(p.key)}',this)">
-        <div class="perm-checkbox">${has ? '✓' : ''}</div>
-        <div class="perm-label">${escapeHtml(p.label)}<small>${escapeHtml(p.desc)}</small></div>
-      </div>`;
+    const has = (user.permissions||[]).includes(p.key);
+    return `<div class="perm-item ${has?'checked':''}" onclick="togglePerm(${user.id},'${p.key}',this)">
+      <div class="perm-checkbox">${has?'✓':''}</div>
+      <div class="perm-label">${escapeHtml(p.label)}<small>${escapeHtml(p.desc)}</small></div>
+    </div>`;
   }).join('');
-
-  const roleBadge = `<span class="badge badge-${escapeHtml(user.role)}">${ROLE_LABELS[user.role] || escapeHtml(user.role)}</span>`;
 
   document.getElementById('admin-detail').innerHTML = `
     <div class="detail-header">
-      <div class="detail-title">${escapeHtml(user.name)}</div>
+      <div class="detail-title">
+        ${escapeHtml(user.name)}
+        ${isMaster ? '<span class="master-badge-lg">ADMIN MASTER</span>' : ''}
+      </div>
       <div class="detail-actions">
         <button class="btn-outline" onclick="resetToRole(${user.id})">Restaurar Perfil</button>
         <button class="btn-primary" onclick="saveUser(${user.id})">Salvar Alterações</button>
-        ${user.id !== currentUser.id ? `<button class="btn-danger" onclick="askDelete(${user.id})">Excluir</button>` : ''}
+        ${!isMaster && !isSelf ? `<button class="btn-danger" onclick="askDelete(${user.id})">Excluir</button>` : ''}
       </div>
     </div>
 
-    ${user.id === currentUser.id ? '<div class="redirect-banner"><span>Você está editando <strong>seu próprio usuário</strong>. A alteração de perfil terá efeito no próximo login.</span></div>' : ''}
+    ${isMaster ? '<div class="redirect-banner" style="background:rgba(26,26,46,.06);border-color:#e2c97e"><span>🔐 <strong>Administrador Master</strong> — conta protegida. Não pode ser excluída nem rebaixada de perfil.</span></div>' : ''}
+    ${isSelf && !isMaster ? '<div class="redirect-banner"><span>Você está editando <strong>seu próprio perfil</strong>. Alterações de acesso valem no próximo login.</span></div>' : ''}
 
     <div class="card">
-      <div class="card-title">Informações do Usuário</div>
+      <div class="card-title">Dados Pessoais</div>
       <div class="field-grid">
-        <div class="field-group">
-          <div class="field-label">Nome Completo</div>
-          <input class="field-input" type="text" id="edit-name-${user.id}" value="${escapeHtml(user.name)}">
-        </div>
-        <div class="field-group">
-          <div class="field-label">Nome de Usuário (login)</div>
-          <input class="field-input" type="text" id="edit-username-${user.id}" value="${escapeHtml(user.username)}">
-        </div>
-        <div class="field-group">
-          <div class="field-label">E-mail</div>
-          <input class="field-input" type="email" id="edit-email-${user.id}" value="${escapeHtml(user.email)}">
-          <span class="field-error" id="err-email-${user.id}"></span>
-        </div>
-        <div class="field-group">
-          <div class="field-label">Nova Senha <span style="color:var(--text-light);font-weight:300">(deixe vazio para manter)</span></div>
-          <input class="field-input" type="password" id="edit-pass-${user.id}" placeholder="Min. 6 caracteres, com letras e números">
-          <span class="field-error" id="err-pass-${user.id}"></span>
-        </div>
-        <div class="field-group">
-          <div class="field-label">Perfil de Acesso</div>
-          <select class="field-select" id="edit-role-${user.id}" onchange="applyRoleDefaults(${user.id},this.value)">
-            <option value="admin" ${user.role==='admin'?'selected':''}>Administrador</option>
+        <div class="field-group"><div class="field-label">Nome</div>
+          <input class="field-input" type="text" id="ed-nome-${user.id}" value="${escapeHtml(user.nome||user.name.split(' ')[0]||'')}"></div>
+        <div class="field-group"><div class="field-label">Sobrenome</div>
+          <input class="field-input" type="text" id="ed-sobrenome-${user.id}" value="${escapeHtml(user.sobrenome||user.name.split(' ').slice(1).join(' ')||'')}"></div>
+        <div class="field-group"><div class="field-label">CPF</div>
+          <input class="field-input" type="text" id="ed-cpf-${user.id}" value="${escapeHtml(user.cpf||'')}" placeholder="000.000.000-00" maxlength="14" oninput="mascaraCPFInput(this)" ${isMaster?'readonly style="opacity:.55"':''}></div>
+        <div class="field-group"><div class="field-label">Nascimento ${nascBadge}</div>
+          <input class="field-input" type="date" id="ed-nasc-${user.id}" value="${escapeHtml(user.nascimento||'')}" onchange="updateDetailAge(${user.id})">
+          <div id="ed-age-${user.id}" style="margin-top:5px"></div></div>
+        <div class="field-group"><div class="field-label">Telefone</div>
+          <input class="field-input" type="tel" id="ed-tel-${user.id}" value="${escapeHtml(user.telefone||'')}" placeholder="(00) 00000-0000" maxlength="15" oninput="mascaraTelefoneInput(this)"></div>
+        <div class="field-group"><div class="field-label">E-mail</div>
+          <input class="field-input" type="email" id="ed-email-${user.id}" value="${escapeHtml(user.email||'')}">
+          <span class="field-error" id="err-ed-email-${user.id}"></span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Credenciais de Acesso</div>
+      <div class="field-grid">
+        <div class="field-group"><div class="field-label">Nome de Usuário (login)</div>
+          <input class="field-input" type="text" id="ed-user-${user.id}" value="${escapeHtml(user.username)}" oninput="slugifyUsername(this)" ${isMaster?'readonly style="opacity:.55"':''}></div>
+        <div class="field-group"><div class="field-label">Nova Senha <span style="color:var(--text-light);font-weight:300">(vazio = manter)</span></div>
+          <input class="field-input" type="password" id="ed-pass-${user.id}" placeholder="Mín. 6 caracteres">
+          <span class="field-error" id="err-ed-pass-${user.id}"></span></div>
+        <div class="field-group"><div class="field-label">Perfil de Acesso</div>
+          <select class="field-select" id="ed-role-${user.id}" onchange="applyRoleDefaults(${user.id},this.value)" ${isMaster?'disabled style="opacity:.55"':''}>
+            <option value="admin"  ${user.role==='admin' ?'selected':''}>Administrador</option>
             <option value="viewer" ${user.role==='viewer'?'selected':''}>Visualizador</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <div class="field-label">Status da Conta</div>
-          <select class="field-select" id="edit-active-${user.id}">
-            <option value="true" ${user.active?'selected':''}>Ativo</option>
+          </select></div>
+        <div class="field-group"><div class="field-label">Status da Conta</div>
+          <select class="field-select" id="ed-active-${user.id}" ${isMaster?'disabled style="opacity:.55"':''}>
+            <option value="true"  ${user.active ?'selected':''}>Ativo</option>
             <option value="false" ${!user.active?'selected':''}>Inativo</option>
-          </select>
-        </div>
+          </select></div>
       </div>
     </div>
 
     <div class="card">
       <div class="card-title">Permissões Individuais</div>
-      <p style="font-size:.78rem;color:var(--text-light);margin-bottom:14px">Permissões concedidas individualmente. Alterar o perfil acima aplica permissões padrão daquele perfil.</p>
+      <p style="font-size:.78rem;color:var(--text-light);margin-bottom:14px">Alterar o perfil acima aplica as permissões padrão daquele perfil.</p>
       <div class="perm-grid">${permsHtml}</div>
     </div>
 
     <div class="card">
       <div class="card-title">Informações do Sistema</div>
       <div class="field-grid">
-        <div class="field-group"><div class="field-label">Último Acesso</div><div class="field-value last-login">${escapeHtml(user.lastLogin)}</div></div>
-        <div class="field-group"><div class="field-label">Cadastrado em</div><div class="field-value">${escapeHtml(user.createdAt)}</div></div>
-        <div class="field-group"><div class="field-label">Perfil Atual</div><div class="field-value">${roleBadge}</div></div>
+        <div class="field-group"><div class="field-label">Último Acesso</div><div class="field-value last-login">${escapeHtml(user.lastLogin||'—')}</div></div>
+        <div class="field-group"><div class="field-label">Cadastrado em</div><div class="field-value">${escapeHtml(user.createdAt||'—')}</div></div>
+        <div class="field-group"><div class="field-label">Perfil</div><div class="field-value"><span class="badge badge-${escapeHtml(user.role)}">${ROLE_LABELS[user.role]||escapeHtml(user.role)}</span></div></div>
         <div class="field-group"><div class="field-label">Status</div><div class="field-value"><span class="badge ${user.active?'badge-active':'badge-inactive'}">${user.active?'Ativo':'Inativo'}</span></div></div>
       </div>
     </div>
   `;
 }
 
-// ══════════════════════════════════════════
-// PERMISSIONS
-// ══════════════════════════════════════════
-function togglePerm(userId, key, el) {
-  const user = users.find(u => u.id === userId);
-  const idx = user.permissions.indexOf(key);
-  if (idx > -1) {
-    user.permissions.splice(idx, 1);
-    el.classList.remove('checked');
-    el.querySelector('.perm-checkbox').textContent = '';
-  } else {
-    user.permissions.push(key);
-    el.classList.add('checked');
-    el.querySelector('.perm-checkbox').textContent = '✓';
-  }
-  persistirUsuarios();
+function updateDetailAge(userId) {
+  const val  = document.getElementById(`ed-nasc-${userId}`)?.value;
+  const wrap = document.getElementById(`ed-age-${userId}`);
+  if (!wrap || !val) return;
+  const { idade, maior } = calcularIdade(val);
+  wrap.innerHTML = ageBadgeHTML(maior, idade);
 }
 
-function applyRoleDefaults(userId, role) {
-  const user = users.find(u => u.id === userId);
-  user.role = role;
-  user.permissions = [...ROLE_DEFAULTS[role]];
-  persistirUsuarios();
-  renderDetail();
-  showToast(`Permissões do perfil "${ROLE_LABELS[role]}" aplicadas`);
+// ══════════════════════════════════════════
+// PERMISSÕES
+// ══════════════════════════════════════════
+async function togglePerm(userId, key, el) {
+  const user = _allUsers.find(u => u.id === userId);
+  if (!user) return;
+  const idx = (user.permissions||[]).indexOf(key);
+  if (idx > -1) { user.permissions.splice(idx,1); el.classList.remove('checked'); el.querySelector('.perm-checkbox').textContent=''; }
+  else          { user.permissions.push(key);      el.classList.add('checked');    el.querySelector('.perm-checkbox').textContent='✓'; }
+  await dbUpdateUser(user);
 }
 
-function resetToRole(userId) {
-  const user = users.find(u => u.id === userId);
-  const role = document.getElementById(`edit-role-${userId}`).value;
+async function applyRoleDefaults(userId, role) {
+  const user = _allUsers.find(u => u.id === userId);
+  if (!user) return;
+  user.role = role; user.permissions = [...ROLE_DEFAULTS[role]];
+  await dbUpdateUser(user); renderDetail();
+  showToast(`Permissões de "${ROLE_LABELS[role]}" aplicadas`);
+}
+
+async function resetToRole(userId) {
+  const user = _allUsers.find(u => u.id === userId);
+  if (!user) return;
+  const role = document.getElementById(`ed-role-${userId}`)?.value || user.role;
   user.permissions = [...ROLE_DEFAULTS[role]];
-  persistirUsuarios();
-  renderDetail();
+  await dbUpdateUser(user); renderDetail();
   showToast('Permissões restauradas para o padrão do perfil');
 }
 
 // ══════════════════════════════════════════
-// SAVE USER (com validação melhorada)
+// SALVAR USUÁRIO
 // ══════════════════════════════════════════
 async function saveUser(userId) {
-  const user = users.find(u => u.id === userId);
-  const newName     = document.getElementById(`edit-name-${userId}`).value.trim();
-  const newUsername = document.getElementById(`edit-username-${userId}`).value.trim();
-  const newEmail    = document.getElementById(`edit-email-${userId}`).value.trim();
-  const newPass     = document.getElementById(`edit-pass-${userId}`).value;
-  const newRole     = document.getElementById(`edit-role-${userId}`).value;
-  const newActive   = document.getElementById(`edit-active-${userId}`).value === 'true';
+  const user = _allUsers.find(u => u.id === userId);
+  if (!user) return;
 
-  // Limpa erros anteriores
-  document.querySelectorAll('.field-error').forEach(e => { e.textContent = ''; e.classList.remove('show'); });
+  const newNome      = document.getElementById(`ed-nome-${userId}`)?.value.trim();
+  const newSobrenome = document.getElementById(`ed-sobrenome-${userId}`)?.value.trim()||'';
+  const newUsername  = document.getElementById(`ed-user-${userId}`)?.value.trim();
+  const newEmail     = document.getElementById(`ed-email-${userId}`)?.value.trim();
+  const newTel       = document.getElementById(`ed-tel-${userId}`)?.value||'';
+  const newCpf       = document.getElementById(`ed-cpf-${userId}`)?.value||'';
+  const newNasc      = document.getElementById(`ed-nasc-${userId}`)?.value||'';
+  const newPass      = document.getElementById(`ed-pass-${userId}`)?.value;
+  const newRole      = document.getElementById(`ed-role-${userId}`)?.value||user.role;
+  const newActive    = document.getElementById(`ed-active-${userId}`)?.value === 'true';
 
-  if (!newName || !newUsername) { showToast('Nome e usuário são obrigatórios', true); return; }
+  document.querySelectorAll('.field-error').forEach(e => { e.textContent=''; e.classList.remove('show'); });
 
-  // Validar email se preenchido
+  if (!newNome || !newUsername) { showToast('Nome e usuário são obrigatórios', true); return; }
   if (newEmail && !validarEmail(newEmail)) {
-    const errEl = document.getElementById(`err-email-${userId}`);
-    if (errEl) { errEl.textContent = 'E-mail inválido'; errEl.classList.add('show'); }
-    showToast('E-mail inválido', true);
-    return;
+    const el = document.getElementById(`err-ed-email-${userId}`);
+    if (el) { el.textContent='E-mail inválido'; el.classList.add('show'); }
+    showToast('E-mail inválido', true); return;
   }
-
-  const dup = users.find(u => u.username === newUsername && u.id !== userId);
+  const dup = _allUsers.find(u => u.username === newUsername && u.id !== userId);
   if (dup) { showToast('Nome de usuário já está em uso', true); return; }
 
-  // Validar senha se preenchida
-  if (newPass.length > 0) {
-    const senhaCheck = validarSenhaForte(newPass);
-    if (!senhaCheck.valido) {
-      const errEl = document.getElementById(`err-pass-${userId}`);
-      if (errEl) { errEl.textContent = senhaCheck.msg; errEl.classList.add('show'); }
-      showToast(senhaCheck.msg, true);
-      return;
+  if (newPass && newPass.length > 0) {
+    const ck = validarSenhaForte(newPass);
+    if (!ck.valido) {
+      const el = document.getElementById(`err-ed-pass-${userId}`);
+      if (el) { el.textContent=ck.msg; el.classList.add('show'); }
+      showToast(ck.msg, true); return;
     }
     user.passwordHash = await hashSenha(newPass);
   }
 
-  user.name     = newName;
-  user.username = newUsername;
-  user.email    = newEmail;
-  user.role     = newRole;
-  user.active   = newActive;
+  user.nome      = newNome;
+  user.sobrenome = newSobrenome;
+  user.name      = newNome + (newSobrenome ? ' '+newSobrenome : '');
+  user.email     = newEmail;
+  user.telefone  = newTel;
+  user.nascimento = newNasc;
+  if (newNasc) { const info = calcularIdade(newNasc); user.idade = info.idade; user.maiorDeIdade = info.maior; }
+  if (!user.isAdminMaster) { user.cpf=newCpf; user.username=newUsername; user.role=newRole; user.active=newActive; }
 
-  persistirUsuarios();
-  renderUserList(document.querySelector('.user-search input').value);
+  await dbUpdateUser(user);
+  await reloadUsers();
+  renderUserList(document.querySelector('.user-search input')?.value||'');
   renderDetail();
   showToast('Usuário atualizado com sucesso!');
 }
 
 // ══════════════════════════════════════════
-// ADD USER MODAL (com validação melhorada)
+// MODAL — ADICIONAR USUÁRIO
 // ══════════════════════════════════════════
 function openAddModal() {
-  document.getElementById('new-name').value = '';
-  document.getElementById('new-username').value = '';
-  document.getElementById('new-pass').value = '';
-  document.getElementById('new-email').value = '';
-  document.querySelectorAll('#add-modal .field-error').forEach(e => { e.textContent = ''; e.classList.remove('show'); });
+  ['new-nome','new-sobrenome','new-username','new-email','new-telefone','new-cpf','new-pass','new-pass2'].forEach(id => {
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  const nasc=document.getElementById('new-nascimento'); if(nasc) nasc.value='';
+  document.querySelectorAll('#add-modal .field-error').forEach(e=>{e.textContent='';e.classList.remove('show');});
+  const badge=document.getElementById('new-age-badge'); if(badge) badge.style.display='none';
   document.getElementById('add-modal').classList.add('open');
 }
 function closeAddModal() { document.getElementById('add-modal').classList.remove('open'); }
 
 async function saveNewUser() {
-  const name     = document.getElementById('new-name').value.trim();
-  const username = document.getElementById('new-username').value.trim();
-  const pass     = document.getElementById('new-pass').value;
-  const email    = document.getElementById('new-email').value.trim();
-  const role     = document.getElementById('new-role').value;
+  const nome      = document.getElementById('new-nome')?.value.trim();
+  const sobrenome = document.getElementById('new-sobrenome')?.value.trim();
+  const username  = document.getElementById('new-username')?.value.trim();
+  const email     = document.getElementById('new-email')?.value.trim();
+  const telefone  = document.getElementById('new-telefone')?.value;
+  const cpf       = document.getElementById('new-cpf')?.value;
+  const nascimento= document.getElementById('new-nascimento')?.value;
+  const role      = document.getElementById('new-role')?.value||'viewer';
+  const pass      = document.getElementById('new-pass')?.value;
+  const pass2     = document.getElementById('new-pass2')?.value;
 
-  if (!name || !username || !pass) { showToast('Preencha todos os campos obrigatórios', true); return; }
+  document.querySelectorAll('#add-modal .field-error').forEach(e=>{e.textContent='';e.classList.remove('show');});
+  const setErr = (id,msg) => { const el=document.getElementById(id); if(el){el.textContent=msg;el.classList.add('show');} };
 
-  // Validar força da senha
-  const senhaCheck = validarSenhaForte(pass);
-  if (!senhaCheck.valido) { showToast(senhaCheck.msg, true); return; }
+  let ok = true;
+  if (!nome)      { setErr('err-new-nome','Nome obrigatório'); ok=false; }
+  if (!sobrenome) { setErr('err-new-sobrenome','Sobrenome obrigatório'); ok=false; }
+  if (!username||username.length<3) { setErr('err-new-username','Mínimo 3 caracteres'); ok=false; }
+  if (!email||!validarEmail(email)) { setErr('err-new-email','E-mail inválido'); ok=false; }
+  if (!telefone||!validarTelefone(telefone)) { setErr('err-new-tel','Telefone inválido'); ok=false; }
+  if (!nascimento) { setErr('err-new-nasc','Informe a data'); ok=false; }
 
-  // Validar email se preenchido
-  if (email && !validarEmail(email)) { showToast('E-mail inválido', true); return; }
+  const cpfL=(cpf||'').replace(/\D/g,'');
+  if (cpfL.length!==11)      { setErr('err-new-cpf','CPF deve ter 11 dígitos'); ok=false; }
+  else if (!validarCPF(cpfL)){ setErr('err-new-cpf','CPF inválido'); ok=false; }
 
-  if (users.find(u => u.username === username)) { showToast('Nome de usuário já está em uso', true); return; }
+  const sc=validarSenhaForte(pass);
+  if (!sc.valido)   { setErr('err-new-pass',sc.msg); ok=false; }
+  if (pass !== pass2){ setErr('err-new-pass2','As senhas não conferem'); ok=false; }
+  if (!ok) return;
 
-  const now = new Date();
-  const created = now.toLocaleDateString('pt-BR');
+  const todos = await dbGetAllUsers();
+  if (await dbGetUserByUsername(username)) { setErr('err-new-username','Usuário já em uso'); return; }
+  if (todos.find(u=>(u.cpf||'').replace(/\D/g,'')=== cpfL)) { setErr('err-new-cpf','CPF já cadastrado'); return; }
+  if (email && todos.find(u=>u.email===email)) { setErr('err-new-email','E-mail já cadastrado'); return; }
+
+  const { idade, maior:maiorDeIdade } = calcularIdade(nascimento);
   const passwordHash = await hashSenha(pass);
-
-  users.push({
-    id: nextId++, name, username, passwordHash, email,
-    role, active: true,
-    lastLogin: 'Nunca', createdAt: created,
-    permissions: [...ROLE_DEFAULTS[role]]
-  });
-
-  persistirUsuarios();
+  await dbCreateUser({ nome, sobrenome, name:nome+' '+sobrenome, username, email, telefone, cpf, nascimento, idade, maiorDeIdade, passwordHash, role, active:true, isAdminMaster:false, lastLogin:'Nunca', createdAt:new Date().toLocaleDateString('pt-BR'), permissions:[...ROLE_DEFAULTS[role]] });
+  await reloadUsers();
   closeAddModal();
-  renderUserList(document.querySelector('.user-search input').value);
-  showToast(`Usuário "${escapeHtml(name)}" criado com sucesso!`);
+  renderUserList(document.querySelector('.user-search input')?.value||'');
+  showToast(`Usuário "${escapeHtml(nome+' '+sobrenome)}" criado com sucesso!`);
 }
 
 // ══════════════════════════════════════════
-// DELETE
+// EXCLUIR USUÁRIO
 // ══════════════════════════════════════════
 function askDelete(id) {
-  deleteTargetId = id;
-  const user = users.find(u => u.id === id);
-  document.getElementById('del-name-label').textContent = user.name;
+  const user=_allUsers.find(u=>u.id===id);
+  if (!user) return;
+  if (user.isAdminMaster) { showToast('O Administrador Master não pode ser excluído.', true); return; }
+  deleteTargetId=id;
+  document.getElementById('del-name-label').textContent=user.name;
   document.getElementById('del-modal').classList.add('open');
 }
-function closeDelModal() { document.getElementById('del-modal').classList.remove('open'); deleteTargetId = null; }
-function confirmDelete() {
-  users = users.filter(u => u.id !== deleteTargetId);
-  selectedUserId = null;
-  persistirUsuarios();
+function closeDelModal() { document.getElementById('del-modal').classList.remove('open'); deleteTargetId=null; }
+async function confirmDelete() {
+  if (!deleteTargetId) return;
+  const user=_allUsers.find(u=>u.id===deleteTargetId);
+  if (user?.isAdminMaster) { showToast('O Administrador Master não pode ser excluído.', true); closeDelModal(); return; }
+  await dbDeleteUser(deleteTargetId);
+  selectedUserId=null;
+  await reloadUsers();
   closeDelModal();
-  renderUserList(document.querySelector('.user-search input').value);
-  document.getElementById('admin-detail').innerHTML = '<div class="detail-empty"><div class="big-icon">👥</div><p>Selecione um usuário para<br>visualizar e editar suas permissões</p></div>';
+  renderUserList(document.querySelector('.user-search input')?.value||'');
+  const d=document.getElementById('admin-detail');
+  if (d) d.innerHTML='<div class="detail-empty"><div class="big-icon">👥</div><p>Selecione um usuário para<br>visualizar e editar suas informações</p></div>';
   showToast('Usuário excluído com sucesso');
 }
 
-// Modals — close on overlay click
+// Fecha modais clicando no overlay
 ['add-modal','del-modal'].forEach(id => {
-  document.getElementById(id).addEventListener('click', e => { if (e.target.id === id) document.getElementById(id).classList.remove('open'); });
+  const el=document.getElementById(id);
+  if (el) el.addEventListener('click', e => { if(e.target.id===id) el.classList.remove('open'); });
 });
-
-// ══════════════════════════════════════════
-// TOAST
-// ══════════════════════════════════════════
-function showToast(msg, isError=false) {
-  const c = document.getElementById('toast-container');
-  const t = document.createElement('div');
-  t.className = 'toast' + (isError ? ' error' : '');
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => t.remove(), 3800);
-}
