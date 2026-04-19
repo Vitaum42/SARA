@@ -1407,3 +1407,53 @@
 
   /* ── Remove old role-pills (no longer used) ── */
   .role-pills { display: none !important; }
+
+  /* ── Aviso de perfil no cadastro ── */
+  .reg-role-info {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: var(--green-50);
+    border: 1px solid var(--green-200);
+    border-left: 3px solid var(--green-500);
+    border-radius: 8px;
+    padding: 11px 14px;
+    font-size: .8rem;
+    color: var(--text-mid);
+    line-height: 1.5;
+    margin-top: 4px;
+  }
+  .reg-role-info svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--green-600);
+  }
+  .reg-role-info strong { color: var(--green-800); }
+
+  /* ── Navegação do cadastro — dois botões iguais ── */
+  .reg-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  .reg-btn-secondary {
+    background: var(--white) !important;
+    color: var(--green-700) !important;
+    border: 1.5px solid var(--green-300) !important;
+  }
+  .reg-btn-secondary:hover {
+    background: var(--green-50) !important;
+    border-color: var(--green-500) !important;
+  }
+
+  /* ── Info de perfil — uma linha só ── */
+  .reg-role-info {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 8px;
+    white-space: normal;
+  }
+  .reg-role-info span { display: inline; }

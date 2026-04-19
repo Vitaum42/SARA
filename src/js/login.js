@@ -36,7 +36,7 @@ let selectedUserId = null;
 let deleteTargetId = null;
 let _allUsers      = [];
 let _regStep       = 1;
-let _regRole       = 'viewer';
+const _regRole = 'viewer'; // Cadastro público sempre cria Visualizador
 
 // ─── Boot: inicializa DB ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -256,16 +256,11 @@ function resetRegisterForm() {
   const sw = document.getElementById('reg-strength-wrap');
   if (sw) sw.style.display = 'none';
 
-  // Reseta perfil selecionado para viewer
-  document.querySelectorAll('.reg-profile-card').forEach(c => c.classList.remove('active'));
-  const vc = document.querySelector('.reg-profile-card[data-role="viewer"]');
-  if (vc) vc.classList.add('active');
+  // Perfil sempre Visualizador — sem reset necessário
 
   // Mostra nav e back-link
   const nav = document.getElementById('reg-nav');
   if (nav) nav.style.display = '';
-  const bl = document.getElementById('reg-back-link');
-  if (bl) bl.style.display = '';
 
   goToRegStep(1);
 }
@@ -285,7 +280,7 @@ function goToRegStep(step) {
   const nBtn  = document.getElementById('reg-btn-next');
   const nTxt  = document.getElementById('reg-btn-text');
   const ldr   = document.getElementById('reg-loader');
-  if (back) back.style.visibility = step > 1 ? 'visible' : 'hidden';
+  if (back) back.style.visibility = 'visible';
   if (nBtn) nBtn.disabled = false;
   if (ldr)  ldr.style.display = 'none';
   if (nTxt) nTxt.textContent = step === 3 ? 'Criar Conta' : 'Próximo →';
@@ -349,11 +344,7 @@ function toggleRegPass(id) {
   if (inp) inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 
-function selectProfile(el, role) {
-  _regRole = role;
-  document.querySelectorAll('.reg-profile-card').forEach(c => c.classList.remove('active'));
-  el.classList.add('active');
-}
+// selectProfile removido: perfil público é sempre Visualizador
 
 // ── Validadores por passo ────────────────
 function regSetErr(id, msg) {
@@ -418,7 +409,7 @@ async function validateStep3() {
   const username = document.getElementById('reg-username')?.value.trim();
   const senha    = document.getElementById('reg-senha')?.value;
   const senha2   = document.getElementById('reg-senha2')?.value;
-  ['rerr-username','rerr-perfil','rerr-senha','rerr-senha2'].forEach(regClearErr);
+  ['rerr-username','rerr-senha','rerr-senha2'].forEach(regClearErr);
   let ok = true;
 
   if (!username || username.length < 3) {
@@ -439,20 +430,19 @@ async function regNext() {
   if (_regStep === 2) { const ok = await validateStep2(); if (!ok) return; }
   if (_regStep === 3) { await submitRegister(); return; }
 
-  // Ao chegar no passo 3: sugere username automaticamente
+  // Ao chegar no passo 3: foca no campo de username para o usuário digitar
   if (_regStep === 2) {
-    const uEl = document.getElementById('reg-username');
-    if (uEl && !uEl.value) {
-      const n = document.getElementById('reg-nome')?.value.trim() || '';
-      const s = document.getElementById('reg-sobrenome')?.value.trim() || '';
-      uEl.value = (n + '.' + s).toLowerCase().replace(/\s+/g,'.').replace(/[^a-z0-9.]/g,'');
-    }
+    setTimeout(() => document.getElementById('reg-username')?.focus(), 100);
   }
   goToRegStep(_regStep + 1);
 }
 
 function regBack() {
-  if (_regStep > 1) goToRegStep(_regStep - 1);
+  if (_regStep > 1) {
+    goToRegStep(_regStep - 1);
+  } else {
+    closeRegisterScreen();
+  }
 }
 
 async function submitRegister() {
@@ -510,7 +500,7 @@ function showRegisterSuccess(data) {
     const d = document.getElementById('rstep-' + i); if (d) { d.classList.remove('active'); d.classList.add('done'); }
   }
   const nav = document.getElementById('reg-nav');    if (nav) nav.style.display = 'none';
-  const bl  = document.getElementById('reg-back-link'); if (bl)  bl.style.display = 'none';
+
 
   const sc = document.getElementById('rsec-success');
   if (!sc) return;
@@ -525,7 +515,7 @@ function showRegisterSuccess(data) {
         <div class="rsc-row"><span class="rsc-label">Usuário</span><span class="rsc-val"><code>@${escapeHtml(data.username)}</code></span></div>
         <div class="rsc-row"><span class="rsc-label">E-mail</span><span class="rsc-val">${escapeHtml(data.email)}</span></div>
         <div class="rsc-row"><span class="rsc-label">CPF</span><span class="rsc-val">${escapeHtml(data.cpf)} ${ageBadgeHTML(data.maiorDeIdade, data.idade)}</span></div>
-        <div class="rsc-row"><span class="rsc-label">Perfil</span><span class="rsc-val"><strong>${data.role === 'admin' ? 'Administrador' : 'Visualizador'}</strong></span></div>
+        <div class="rsc-row"><span class="rsc-label">Perfil</span><span class="rsc-val"><span class="age-tag maior" style="margin-left:0">👁 Visualizador</span></span></div>
       </div>
       <button class="btn-login" onclick="closeRegisterScreen()" style="margin-top:22px;width:100%;justify-content:center">
         Ir para o Login
