@@ -671,7 +671,7 @@ function renderProposicoes(proposicoes) {
     <div style="padding:14px;border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div style="flex:1">
         <div style="font-weight:600;font-size:.88rem;margin-bottom:4px">
-          <span style="background:var(--bg-alt,#f4f4f5);padding:2px 8px;border-radius:12px;font-size:.75rem;margin-right:8px">${p.siglaTipo || '—'} ${p.numero || ''}/${p.ano || ''}</span>
+          <span style="background:var(--bg-alt,#f4f4f5);padding:2px 8px;color:black;border-radius:12px;font-size:.75rem;margin-right:8px">${p.siglaTipo || '—'} ${p.numero || ''}/${p.ano || ''}</span>
           ${p.ementa || 'Sem ementa.'}
         </div>
         <div style="font-size:.76rem;color:var(--text-light);margin-top:4px">
