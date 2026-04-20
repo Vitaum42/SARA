@@ -5,6 +5,14 @@
 
 const CAMARA_API = 'https://dadosabertos.camara.leg.br/api/v2';
 
+// ─── Cache em memória com TTL ─────────────────────────────────────────────
+const _cache = {
+  _store: {},
+  TTL_LONGA: 30*60*1000, TTL_LISTA: 60*60*1000, TTL_CURTA: 10*60*1000,
+  set(k,v,t){ this._store[k]={value:v,exp:Date.now()+t}; },
+  get(k){ const e=this._store[k]; if(!e) return undefined; if(Date.now()>e.exp){delete this._store[k];return undefined;} return e.value; },
+};
+
 // ─── Rate Limiter ──────────────────────────────────────────────────────────
 const _rateLimiter = {
   queue: [],
@@ -39,19 +47,27 @@ const _rateLimiter = {
  * silent=true → erros vão só pro console, sem toast (para chamadas em background/loop)
  * silent=false → mostra toast de erro (para ações diretas do usuário)
  */
-async function fetchCamara(endpoint, params = {}, silent = false) {
-  const query = new URLSearchParams({ ...params, itens: params.itens || 20 }).toString();
-  const url = `${CAMARA_API}${endpoint}?${query}`;
+async function _ftch(url, opts={}) {
+  const c=new AbortController(); const t=setTimeout(()=>c.abort(),8000);
+  try{ const r=await fetch(url,{...opts,signal:c.signal}); clearTimeout(t); if(!r.ok) throw new Error('HTTP '+r.status); return r; }
+  catch(e){ clearTimeout(t); throw e; }
+}
+async function _retry(url,opts={},n=3){ for(let i=0;i<n;i++){ try{return await _ftch(url,opts);}catch(e){if(i===n-1)throw e; await new Promise(r=>setTimeout(r,300*(i+1)));} } }
+
+async function fetchCamara(endpoint, params={}, silent=false, ttl) {
+  const q   = new URLSearchParams({...params, itens: params.itens||20}).toString();
+  const url = CAMARA_API+endpoint+'?'+q;
+  const hit = _cache.get(url);
+  if(hit !== undefined) return hit;
   try {
-    const res = await fetchComRetry(url, {
-      headers: { 'Accept': 'application/json' },
-      mode: 'cors'
-    }, 3, 1000);
+    const res  = await _retry(url, {headers:{'Accept':'application/json'},mode:'cors'});
     const json = await res.json();
-    return json.dados;
-  } catch (err) {
+    const data = json.dados ?? null;
+    _cache.set(url, data, ttl!==undefined ? ttl : _cache.TTL_CURTA);
+    return data;
+  } catch(err) {
     console.warn('[SARA API]', endpoint, err.message);
-    if (!silent) showToast('Erro ao conectar com a API da Câmara. Verifique sua conexão.');
+    if(!silent) showToast('Não foi possível conectar com a API da Câmara.');
     return null;
   }
 }
@@ -95,18 +111,30 @@ async function buscarDeputados(filtros = {}) {
  * Busca TODOS os deputados, paginando automaticamente.
  */
 async function buscarTodosDeputados() {
-  let todos = [];
-  let pagina = 1;
-  while (true) {
-    const lote = await fetchCamara('/deputados', {
-      ordem: 'ASC', ordenarPor: 'nome', itens: 100, pagina
-    }, true);
-    if (!lote || lote.length === 0) break;
-    todos = todos.concat(lote);
-    if (lote.length < 100) break; // ultima pagina
-    pagina++;
-  }
-  return todos.length > 0 ? todos : null;
+  const CK='todos_deps_v1', hit=_cache.get(CK);
+  if(hit!==undefined) return hit;
+  try {
+    const opts={headers:{'Accept':'application/json'},mode:'cors'};
+    const q1=new URLSearchParams({ordem:'ASC',ordenarPor:'nome',itens:100,pagina:1}).toString();
+    const r1=await _retry(CAMARA_API+'/deputados?'+q1, opts);
+    const j1=await r1.json();
+    const pg1=j1.dados||[];
+    if(!pg1.length) return null;
+    let totalPgs=1;
+    const lastHref=(j1.links||[]).find(l=>l.rel==='last')?.href||'';
+    const lm=lastHref.match(/pagina=([0-9]+)/);
+    if(lm) totalPgs=parseInt(lm[1]); else if(pg1.length===100) totalPgs=6;
+    const extras=await Promise.all(Array.from({length:totalPgs-1},(_,i)=>i+2).map(async pg=>{
+      try{
+        const q=new URLSearchParams({ordem:'ASC',ordenarPor:'nome',itens:100,pagina:pg}).toString();
+        const r=await _retry(CAMARA_API+'/deputados?'+q,opts);
+        return (await r.json()).dados||[];
+      }catch{return [];}
+    }));
+    const todos=[pg1,...extras].flat();
+    _cache.set(CK,todos,_cache.TTL_LISTA);
+    return todos.length?todos:null;
+  } catch(err){ console.warn('[SARA] buscarTodosDeputados:',err.message); return null; }
 }
 
 // ─── Senadores (API do Senado) ──────────────────────────────────────────────
@@ -148,17 +176,14 @@ async function buscarSenadores() {
  * @param {number|string} id
  */
 async function buscarDeputadoPorId(id) {
-  try {
-    const res = await fetchComRetry(`${CAMARA_API}/deputados/${id}`, {
-      headers: { 'Accept': 'application/json' }
-    }, 3, 1000);
-    const json = await res.json();
-    return json.dados;
-  } catch (err) {
-    console.error('[SARA API]', err.message);
-    showToast('Erro ao buscar detalhes do deputado.');
-    return null;
-  }
+  const CK='dep_'+id, hit=_cache.get(CK);
+  if(hit!==undefined) return hit;
+  try{
+    const r=await _retry(CAMARA_API+'/deputados/'+id,{headers:{'Accept':'application/json'},mode:'cors'});
+    const data=(await r.json()).dados??null;
+    if(data) _cache.set(CK,data,_cache.TTL_LONGA);
+    return data;
+  }catch(err){ console.warn('[SARA API] buscarDeputadoPorId:',err.message); return null; }
 }
 
 /**
@@ -166,17 +191,11 @@ async function buscarDeputadoPorId(id) {
  * @param {number|string} id
  * @param {object} filtros - { ano, mes, itens }
  */
-async function buscarDespesasDeputado(id, filtros = {}) {
-  const params = { itens: 50, ...filtros };
-  return await fetchCamara(`/deputados/${id}/despesas`, params);
+async function buscarDespesasDeputado(id, filtros={}) {
+  return await fetchCamara('/deputados/'+id+'/despesas',{itens:50,...filtros},true,_cache.TTL_CURTA);
 }
-
-/**
- * Busca os discursos de um deputado.
- * @param {number|string} id
- */
 async function buscarDiscursosDeputado(id) {
-  return await fetchCamara(`/deputados/${id}/discursos`, { itens: 10 });
+  return await fetchCamara('/deputados/'+id+'/discursos',{itens:10},true,_cache.TTL_CURTA);
 }
 
 /**
@@ -411,71 +430,145 @@ async function popularSelectDeputados() {
 }
 
 // ─── Modal de Detalhes ────────────────────────────────────────────────────────
+function fecharModalPolitico() {
+  document.getElementById('pol-modal').classList.remove('open');
+}
 
 async function abrirDetalhes(id, nome) {
-  showToast(`🔍 Carregando dados de ${nome}…`);
-  const [detalhes, despesas, discursos] = await Promise.all([
+  const modal = document.getElementById('pol-modal');
+  if (!modal) { showToast('Modal não encontrado. Recarregue a página.', true); return; }
+
+  // Abre o modal com estado de carregamento
+  document.getElementById('pol-modal-nome').textContent   = nome;
+  document.getElementById('pol-modal-meta').textContent   = 'Carregando dados…';
+  document.getElementById('pol-modal-badges').innerHTML   = '';
+  document.getElementById('pol-modal-stats').innerHTML    = '<div class="pol-modal-loading">Buscando informações na API da Câmara…</div>';
+  document.getElementById('pol-modal-info-grid').innerHTML = '';
+  document.getElementById('pol-modal-despesas').innerHTML  = '';
+  document.getElementById('pol-modal-discursos-section').style.display = 'none';
+
+  const foto = document.getElementById('pol-modal-foto');
+  const initials = document.getElementById('pol-modal-initials');
+  foto.src = `https://www.camara.leg.br/internet/deputado/bandep/${id}.jpg`;
+  foto.style.display = '';
+  initials.style.display = 'none';
+  initials.textContent = getInitials(nome);
+
+  document.getElementById('pol-modal-link').href = `https://www.camara.leg.br/deputados/${id}`;
+  modal.classList.add('open');
+  modal.onclick = e => { if (e.target === modal) fecharModalPolitico(); };
+
+  // Busca dados em paralelo — allSettled garante que a falha de um não derruba os outros
+  const anoAtual = new Date().getFullYear();
+  const [rDetalhes, rDespesas, rDiscursos] = await Promise.allSettled([
     buscarDeputadoPorId(id),
-    buscarDespesasDeputado(id, { ano: new Date().getFullYear(), itens: 20 }),
+    buscarDespesasDeputado(id, { ano: anoAtual, itens: 20 }),
     buscarDiscursosDeputado(id)
   ]);
 
-  if (!detalhes) return;
+  const detalhes  = rDetalhes.status  === 'fulfilled' ? rDetalhes.value  : null;
+  const despesas  = rDespesas.status  === 'fulfilled' ? rDespesas.value  : null;
+  const discursos = rDiscursos.status === 'fulfilled' ? rDiscursos.value : null;
 
-  const info = detalhes.ultimoStatus || {};
+  if (!detalhes) {
+    document.getElementById('pol-modal-stats').innerHTML =
+      '<div class="pol-modal-loading" style="color:#ef4444">⚠️ Não foi possível carregar os dados desta vez. A API da Câmara pode estar instável — tente novamente em instantes.</div>';
+    return;
+  }
+
+  const info        = detalhes.ultimoStatus || {};
   const totalGastos = (despesas || []).reduce((a, d) => a + (d.valorLiquido || 0), 0);
+  const nomeExibido = info.nomeEleitoral || nome;
 
-  const modal = document.getElementById('demand-modal');
-  modal.innerHTML = `
-    <div class="modal-box" style="max-width:700px">
-      <div class="modal-header">
-        <div class="modal-title">
-          <div class="avatar" style="width:48px;height:48px;font-size:1.1rem">${getInitials(info.nome || nome)}</div>
-          <div>
-            <h2 style="margin:0;font-size:1.1rem">${info.nomeEleitoral || nome}</h2>
-            <span style="font-size:.8rem;color:var(--text-light)">${info.siglaPartido || ''} · ${info.siglaUf || ''} · ${info.descricaoStatus || ''}</span>
-          </div>
-        </div>
-        <button onclick="closeModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-light)">✕</button>
-      </div>
+  // Atualiza nome e meta
+  document.getElementById('pol-modal-nome').textContent = nomeExibido;
+  document.getElementById('pol-modal-meta').innerHTML =
+    `${escapeHtml(info.siglaPartido || '—')} &nbsp;·&nbsp; ${escapeHtml(info.siglaUf || '—')} &nbsp;·&nbsp; ${escapeHtml(info.descricaoStatus || 'Deputado(a) Federal')}`;
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0">
-        <div class="stat-card" style="margin:0">
-          <div class="stat-label">Gabinete</div>
-          <div class="stat-value" style="font-size:1rem">${info.gabinete?.nome || '—'}</div>
-          <div class="stat-change">Sala ${info.gabinete?.sala || '—'} · ${info.gabinete?.predio || '—'}</div>
-        </div>
-        <div class="stat-card" style="margin:0">
-          <div class="stat-label">Gastos (${new Date().getFullYear()})</div>
-          <div class="stat-value" style="font-size:1rem">${formatCurrency(totalGastos)}</div>
-          <div class="stat-change">${(despesas || []).length} lançamentos</div>
-        </div>
-      </div>
+  // Badges
+  const badgesEl = document.getElementById('pol-modal-badges');
+  badgesEl.innerHTML = `<span class="pol-badge pol-badge-green">Ativo</span>` +
+    (info.siglaPartido ? `<span class="pol-badge pol-badge-neutral">${escapeHtml(info.siglaPartido)}</span>` : '') +
+    (info.siglaUf     ? `<span class="pol-badge pol-badge-blue">${escapeHtml(info.siglaUf)}</span>` : '');
 
-      ${info.email ? `<p style="font-size:.85rem;color:var(--text-light);margin:0 0 12px">📧 <a href="mailto:${info.email}">${info.email}</a></p>` : ''}
+  // Atualiza foto — fallback por initials
+  initials.textContent = getInitials(nomeExibido);
 
-      ${discursos && discursos.length > 0 ? `
-        <div style="margin-top:12px">
-          <div style="font-weight:600;font-size:.85rem;margin-bottom:8px">🎤 Últimos Discursos</div>
-          ${discursos.slice(0, 3).map(d => `
-            <div style="padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;font-size:.8rem">
-              <strong>${d.dataHoraInicio?.substring(0, 10) || '—'}</strong> · ${d.sumario || d.tipoDiscurso || 'Sem resumo'}
-            </div>
-          `).join('')}
-        </div>
-      ` : ''}
-
-      <div style="text-align:right;margin-top:16px">
-        <button class="btn-outline" onclick="closeModal()">Fechar</button>
-        <a class="btn-primary" style="text-decoration:none;padding:8px 18px;border-radius:8px"
-           href="https://www.camara.leg.br/deputados/${id}" target="_blank">
-          Ver no site da Câmara ↗
-        </a>
+  // Stats cards
+  const nDespesas = (despesas || []).length;
+  document.getElementById('pol-modal-stats').innerHTML = `
+    <div class="pol-stat-card">
+      <div class="pol-stat-icon">💰</div>
+      <div class="pol-stat-info">
+        <div class="pol-stat-value">${formatCurrency(totalGastos)}</div>
+        <div class="pol-stat-label">Gastos em ${anoAtual}</div>
+        <div class="pol-stat-sub">${nDespesas} lançamento${nDespesas !== 1 ? 's' : ''}</div>
       </div>
     </div>
-  `;
-  modal.classList.add('open');
+    <div class="pol-stat-card">
+      <div class="pol-stat-icon">🏛️</div>
+      <div class="pol-stat-info">
+        <div class="pol-stat-value">${escapeHtml(info.gabinete?.nome || '—')}</div>
+        <div class="pol-stat-label">Gabinete</div>
+        <div class="pol-stat-sub">Sala ${escapeHtml(info.gabinete?.sala || '—')} · ${escapeHtml(info.gabinete?.predio || '—')}</div>
+      </div>
+    </div>
+    <div class="pol-stat-card">
+      <div class="pol-stat-icon">📋</div>
+      <div class="pol-stat-info">
+        <div class="pol-stat-value">${escapeHtml(info.descricaoStatus || '—')}</div>
+        <div class="pol-stat-label">Cargo / Status</div>
+        <div class="pol-stat-sub">${escapeHtml(info.siglaUf || '')} — Brasil</div>
+      </div>
+    </div>`;
+
+  // Info grid
+  const campos = [
+    { label: 'Nome Eleitoral',  valor: info.nomeEleitoral || '—' },
+    { label: 'Partido',         valor: info.siglaPartido  || '—' },
+    { label: 'Estado (UF)',     valor: info.siglaUf       || '—' },
+    { label: 'Situação',        valor: info.situacao      || info.descricaoStatus || '—' },
+    { label: 'E-mail',          valor: info.email         || '—', link: info.email ? `mailto:${info.email}` : null },
+    { label: 'Condomínio',      valor: info.gabinete?.nome || '—' },
+    { label: 'Sala',            valor: info.gabinete?.sala ? `Sala ${info.gabinete.sala} · ${info.gabinete.predio || ''}` : '—' },
+    { label: 'Telefone',        valor: info.gabinete?.telefone || '—' },
+  ];
+  document.getElementById('pol-modal-info-grid').innerHTML = campos.map(c => `
+    <div class="pol-info-item">
+      <span class="pol-info-label">${escapeHtml(c.label)}</span>
+      <span class="pol-info-value">${c.link ? `<a href="${escapeHtml(c.link)}" style="color:var(--green-600)">${escapeHtml(c.valor)}</a>` : escapeHtml(c.valor)}</span>
+    </div>`).join('');
+
+  // Ano label
+  document.getElementById('pol-modal-ano').textContent = anoAtual;
+
+  // Despesas
+  const despesasEl = document.getElementById('pol-modal-despesas');
+  if (!despesas || despesas.length === 0) {
+    despesasEl.innerHTML = '<div class="pol-modal-empty">Nenhuma despesa registrada para este período.</div>';
+  } else {
+    despesasEl.innerHTML = despesas.slice(0, 8).map(d => `
+      <div class="pol-despesa-item">
+        <div class="pol-despesa-info">
+          <div class="pol-despesa-tipo">${escapeHtml(d.tipoDespesa || '—')}</div>
+          <div class="pol-despesa-sub">${escapeHtml(d.nomeFornecedor || '—')} · ${escapeHtml(d.dataDocumento?.substring(0,10) || '—')}</div>
+        </div>
+        <div class="pol-despesa-valor ${(d.valorLiquido || 0) > 5000 ? 'pol-despesa-alto' : ''}">${formatCurrency(d.valorLiquido || 0)}</div>
+        ${d.urlDocumento ? `<a href="${escapeHtml(d.urlDocumento)}" target="_blank" class="pol-despesa-doc" title="Ver documento">📄</a>` : '<span></span>'}
+      </div>`).join('');
+  }
+
+  // Discursos
+  if (discursos && discursos.length > 0) {
+    document.getElementById('pol-modal-discursos-section').style.display = '';
+    document.getElementById('pol-modal-discursos').innerHTML = discursos.slice(0, 3).map(d => `
+      <div class="pol-discurso-item">
+        <div class="pol-discurso-data">${escapeHtml(d.dataHoraInicio?.substring(0,10) || '—')}</div>
+        <div class="pol-discurso-texto">${escapeHtml(d.sumario || d.tipoDiscurso || 'Sem resumo disponível')}</div>
+      </div>`).join('');
+  }
 }
+
 
 // ─── Busca na tabela de políticos ─────────────────────────────────────────────
 

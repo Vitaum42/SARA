@@ -877,6 +877,65 @@
   </div>
 </div>
 
+<!-- ── MODAL POLÍTICO ── -->
+<div class="modal-overlay" id="pol-modal">
+  <div class="pol-modal-box">
+
+    <!-- Header com foto e identidade -->
+    <div class="pol-modal-header">
+      <div class="pol-modal-identity">
+        <div class="pol-modal-avatar" id="pol-modal-avatar-wrap">
+          <img id="pol-modal-foto" src="" alt="" onerror="this.style.display='none';document.getElementById('pol-modal-initials').style.display='flex'">
+          <div id="pol-modal-initials" class="pol-modal-initials-fallback"></div>
+        </div>
+        <div class="pol-modal-identity-info">
+          <h2 id="pol-modal-nome"></h2>
+          <div class="pol-modal-meta" id="pol-modal-meta"></div>
+          <div class="pol-modal-badges" id="pol-modal-badges"></div>
+        </div>
+      </div>
+      <button class="pol-modal-close" onclick="fecharModalPolitico()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Corpo com scroll -->
+    <div class="pol-modal-body">
+
+      <!-- Cards de resumo -->
+      <div class="pol-modal-stats" id="pol-modal-stats"></div>
+
+      <!-- Grid de informações -->
+      <div class="pol-modal-section">
+        <div class="pol-modal-section-title">Informações do Mandato</div>
+        <div class="pol-modal-info-grid" id="pol-modal-info-grid"></div>
+      </div>
+
+      <!-- Últimas despesas -->
+      <div class="pol-modal-section" id="pol-modal-despesas-section">
+        <div class="pol-modal-section-title">Despesas Recentes <span class="pol-modal-section-year" id="pol-modal-ano"></span></div>
+        <div id="pol-modal-despesas"></div>
+      </div>
+
+      <!-- Discursos -->
+      <div class="pol-modal-section" id="pol-modal-discursos-section" style="display:none">
+        <div class="pol-modal-section-title">Últimos Discursos</div>
+        <div id="pol-modal-discursos"></div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="pol-modal-footer">
+      <button class="btn-outline" onclick="fecharModalPolitico()">Fechar</button>
+      <a id="pol-modal-link" class="btn-primary" style="text-decoration:none" target="_blank" href="#">
+        Ver perfil oficial ↗
+      </a>
+    </div>
+
+  </div>
+</div>
+
 <!-- ── TOASTS ── -->
 <div class="toast-container" id="toast-container"></div>
 
