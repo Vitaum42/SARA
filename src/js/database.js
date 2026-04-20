@@ -1,212 +1,151 @@
 // ══════════════════════════════════════════════════════════════════════
-// SARA — Banco de Dados (IndexedDB)
-// Camada de persistência principal do sistema
-// Versão: 3.0 | Substitui localStorage para dados de usuários
+// SARA — Banco de Dados (Firebase Firestore — SDK Compat v9)
+// Carregado via CDN no index.html antes deste arquivo
 // ══════════════════════════════════════════════════════════════════════
 
-const DB_NAME    = 'SARA_DB';
-const DB_VERSION = 1;
+const firebaseConfig = {
+  apiKey:            "AIzaSyBuby3f8-z3rihGlOkWXrPJr87fRrYL2fc",
+  authDomain:        "sara-a266d.firebaseapp.com",
+  projectId:         "sara-a266d",
+  storageBucket:     "sara-a266d.firebasestorage.app",
+  messagingSenderId: "480442628820",
+  appId:             "1:480442628820:web:67d326cf266216f9bb5941",
+  measurementId:     "G-08913ECVJB"
+};
 
-// Objeto de usuário ADMINISTRADOR padrão (senha: Admin@2025)
-// Hash SHA-256 de "Admin@2025"
-const ADMIN_PASSWORD_HASH = 'b9d11294e1f4f8d5ca79f5a8eab6c9a1a47c1fa3cf8c6d7e0d2b4a5f8e3c1d0';
-
-// Calculado em runtime para garantir que está correto
-let _DB = null;
-
-// ──────────────────────────────────────────
-// Inicialização do banco
-// ──────────────────────────────────────────
-async function dbInit() {
-  if (_DB) return _DB;
-
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-
-      // ── Object Store: usuarios ─────────────────
-      if (!db.objectStoreNames.contains('usuarios')) {
-        const store = db.createObjectStore('usuarios', { keyPath: 'id', autoIncrement: true });
-        store.createIndex('username', 'username', { unique: true });
-        store.createIndex('email',    'email',    { unique: false });
-        store.createIndex('role',     'role',     { unique: false });
-        store.createIndex('cpf',      'cpf',      { unique: false });
-      }
-
-      // ── Object Store: demandas ─────────────────
-      if (!db.objectStoreNames.contains('demandas')) {
-        const ds = db.createObjectStore('demandas', { keyPath: 'id', autoIncrement: true });
-        ds.createIndex('status',   'status',   { unique: false });
-        ds.createIndex('politico', 'politico', { unique: false });
-      }
-
-      // ── Object Store: config (chave-valor) ─────
-      if (!db.objectStoreNames.contains('config')) {
-        db.createObjectStore('config', { keyPath: 'chave' });
-      }
-    };
-
-    req.onsuccess = (e) => {
-      _DB = e.target.result;
-      resolve(_DB);
-    };
-
-    req.onerror = () => reject(req.error);
-  });
+// Inicializa Firebase (evita duplicar se já foi inicializado)
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
 }
+const _db = firebase.firestore();
+
+// Coleções
+const COL_USERS   = 'usuarios';
+const COL_CONFIG  = 'config';
+const COL_DEMANDS = 'demandas';
 
 // ──────────────────────────────────────────
-// Helpers genéricos de transação
+// Compatibilidade: dbInit (Firestore não precisa)
 // ──────────────────────────────────────────
-function dbTx(store, mode = 'readonly') {
-  return _DB.transaction(store, mode).objectStore(store);
-}
-
-function dbPromise(req) {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror   = () => reject(req.error);
-  });
-}
+async function dbInit() { return true; }
 
 // ──────────────────────────────────────────
 // CRUD — Usuários
 // ──────────────────────────────────────────
 async function dbGetAllUsers() {
-  await dbInit();
-  return dbPromise(dbTx('usuarios').getAll());
+  const snap = await _db.collection(COL_USERS).get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 async function dbGetUserByUsername(username) {
-  await dbInit();
-  return dbPromise(dbTx('usuarios').index('username').get(username));
+  const snap = await _db.collection(COL_USERS).where('username', '==', username).get();
+  if (snap.empty) return null;
+  const d = snap.docs[0];
+  return { id: d.id, ...d.data() };
 }
 
 async function dbGetUserById(id) {
-  await dbInit();
-  return dbPromise(dbTx('usuarios').get(Number(id)));
+  const snap = await _db.collection(COL_USERS).doc(String(id)).get();
+  if (!snap.exists) return null;
+  return { id: snap.id, ...snap.data() };
 }
 
 async function dbCreateUser(userData) {
-  await dbInit();
-  const { id: _, ...data } = userData; // remove id se vier (autoIncrement)
-  const id = await dbPromise(dbTx('usuarios', 'readwrite').add(data));
-  return { ...data, id };
+  const { id: _, ...data } = userData;
+  const ref = await _db.collection(COL_USERS).add(data);
+  return { ...data, id: ref.id };
 }
 
 async function dbUpdateUser(userData) {
-  await dbInit();
-  await dbPromise(dbTx('usuarios', 'readwrite').put(userData));
+  const { id, ...data } = userData;
+  await _db.collection(COL_USERS).doc(String(id)).set(data);
   return userData;
 }
 
 async function dbDeleteUser(id) {
-  await dbInit();
-  return dbPromise(dbTx('usuarios', 'readwrite').delete(Number(id)));
+  await _db.collection(COL_USERS).doc(String(id)).delete();
 }
 
 // ──────────────────────────────────────────
 // CRUD — Demandas
 // ──────────────────────────────────────────
 async function dbGetAllDemandas() {
-  await dbInit();
-  return dbPromise(dbTx('demandas').getAll());
+  const snap = await _db.collection(COL_DEMANDS).get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
 async function dbCreateDemanda(d) {
-  await dbInit();
-  const id = await dbPromise(dbTx('demandas', 'readwrite').add(d));
-  return { ...d, id };
+  const { id: _, ...data } = d;
+  const ref = await _db.collection(COL_DEMANDS).add(data);
+  return { ...data, id: ref.id };
 }
 
 async function dbUpdateDemanda(d) {
-  await dbInit();
-  return dbPromise(dbTx('demandas', 'readwrite').put(d));
+  const { id, ...data } = d;
+  await _db.collection(COL_DEMANDS).doc(String(id)).set(data);
+  return d;
 }
 
 async function dbDeleteDemanda(id) {
-  await dbInit();
-  return dbPromise(dbTx('demandas', 'readwrite').delete(Number(id)));
+  await _db.collection(COL_DEMANDS).doc(String(id)).delete();
 }
 
 // ──────────────────────────────────────────
 // Config (chave-valor)
 // ──────────────────────────────────────────
 async function dbGetConfig(chave) {
-  await dbInit();
-  const r = await dbPromise(dbTx('config').get(chave));
-  return r ? r.valor : null;
+  const snap = await _db.collection(COL_CONFIG).doc(chave).get();
+  return snap.exists ? snap.data().valor : null;
 }
 
 async function dbSetConfig(chave, valor) {
-  await dbInit();
-  return dbPromise(dbTx('config', 'readwrite').put({ chave, valor }));
+  await _db.collection(COL_CONFIG).doc(chave).set({ valor });
 }
 
 // ──────────────────────────────────────────
-// Seed — Usuário ADMINISTRADOR padrão
-// Executado UMA ÚNICA VEZ na primeira abertura
+// Seed — Admin Master (roda uma única vez)
 // ──────────────────────────────────────────
 async function dbSeedAdmin() {
-  await dbInit();
-
-  // Verifica se já foi feito o seed
   const seeded = await dbGetConfig('admin_seeded');
   if (seeded) return;
 
-  // Calcula hash real de "Admin@2025"
-  const senhaAdmin = 'Admin@2025';
-  const hashReal   = await hashSenha(senhaAdmin);
+  const hashReal = await hashSenha('Admin@2025');
 
-  const adminUser = {
-    name:         'Administrador do Sistema',
-    username:     'admin',
-    passwordHash: hashReal,
-    email:        'admin@sara.gov.br',
-    role:         'admin',
-    active:       true,
-    isAdminMaster: true,          // flag: não pode ser excluído
-    lastLogin:    'Nunca',
-    createdAt:    new Date().toLocaleDateString('pt-BR'),
-    permissions:  ['view_dashboard','view_politicians','edit_politicians','view_expenses','edit_expenses','view_eligibility','view_demands','edit_demands','reports','admin'],
-  };
-
-  // Insere somente se não existir usuário "admin"
   const existing = await dbGetUserByUsername('admin');
   if (!existing) {
-    await dbCreateUser(adminUser);
-    console.info('[SARA DB] Usuário administrador criado. Login: admin | Senha: Admin@2025');
+    await dbCreateUser({
+      nome:          'Administrador',
+      sobrenome:     'do Sistema',
+      name:          'Administrador do Sistema',
+      username:      'admin',
+      passwordHash:  hashReal,
+      email:         'admin@sara.gov.br',
+      role:          'admin',
+      active:        true,
+      isAdminMaster: true,
+      lastLogin:     'Nunca',
+      createdAt:     new Date().toLocaleDateString('pt-BR'),
+      permissions:   ['view_dashboard','view_politicians','edit_politicians',
+                      'view_expenses','edit_expenses','view_eligibility',
+                      'view_demands','edit_demands','reports','admin'],
+    });
+    console.info('[SARA] Admin criado no Firestore. Login: admin | Senha: Admin@2025');
   }
-
-  // Migra usuários do localStorage (se houver dados antigos)
-  await _migrarLocalStorage();
 
   await dbSetConfig('admin_seeded', true);
 }
 
 // ──────────────────────────────────────────
-// Migração de dados antigos (localStorage → IndexedDB)
+// Limpeza: remove viewer padrão legado
 // ──────────────────────────────────────────
-async function _migrarLocalStorage() {
+async function _limparViewerPadrao() {
   try {
-    const raw = localStorage.getItem('sara_users');
-    if (!raw) return;
-    const antigos = JSON.parse(raw);
-    for (const u of antigos) {
-      if (u.username === 'admin') continue; // já criado acima
-      const existe = await dbGetUserByUsername(u.username);
-      if (!existe) {
-        const { id: _, ...dados } = u;
-        await dbCreateUser(dados);
-      }
+    const viewer = await dbGetUserByUsername('viewer');
+    if (viewer) {
+      await dbDeleteUser(viewer.id);
+      console.info('[SARA] Usuário "viewer" padrão removido.');
     }
-    // Remove dados antigos após migração
-    localStorage.removeItem('sara_users');
-    localStorage.removeItem('sara_next_user_id');
-    console.info('[SARA DB] Migração do localStorage concluída');
   } catch (e) {
-    console.warn('[SARA DB] Migração ignorada:', e.message);
+    console.warn('[SARA] Limpeza ignorada:', e.message);
   }
 }
