@@ -577,7 +577,7 @@ function renderUserList(filter = '') {
   if (cnt) cnt.textContent = _allUsers.length + ' usuário' + (_allUsers.length !== 1 ? 's' : '') + ' cadastrado' + (_allUsers.length !== 1 ? 's' : '');
 
   list.innerHTML = filtered.map(u => `
-    <div class="user-item ${u.id === selectedUserId ? 'active' : ''}" onclick="selectUser(${u.id})">
+    <div class="user-item ${u.id === selectedUserId ? 'active' : ''}" onclick="selectUser('${escapeHtml(String(u.id))}')">
       <div class="user-avatar avatar-${escapeHtml(u.role)}">${escapeHtml(getInitials(u.name))}</div>
       <div class="user-item-info">
         <div class="user-item-name">${escapeHtml(u.name)}${u.isAdminMaster ? ' <span class="master-badge">MASTER</span>' : ''}</div>
@@ -589,24 +589,38 @@ function renderUserList(filter = '') {
 }
 
 function filterUsers(val) { renderUserList(val); }
-function selectUser(id)   { selectedUserId = id; renderUserList(document.querySelector('.user-search input')?.value||''); renderDetail(); }
+function selectUser(id)   { selectedUserId = String(id); renderUserList(document.querySelector('.user-search input')?.value||''); renderDetail(); }
 
 // ══════════════════════════════════════════
 // PAINEL ADMIN — DETALHE / EDIÇÃO
 // ══════════════════════════════════════════
-function renderDetail() {
-  const user = _allUsers.find(u => u.id === selectedUserId);
-  if (!user) return;
-  const isSelf   = currentUser && user.id === currentUser.id;
-  const isMaster = !!user.isAdminMaster;
+function maskCPF(cpf) {
+  if (!cpf) return '—';
+  const digits = cpf.replace(/\D/g, '');
+  if (digits.length < 3) return cpf;
+  const first3 = digits.slice(0, 3);
+  // Format: 456.xxx.xxx-xx
+  return first3 + '.xxx.xxx-xx';
+}
 
-  const nascBadge = user.nascimento
-    ? ageBadgeHTML(user.maiorDeIdade, user.idade || '?')
-    : '';
+function maskEmail(email) {
+  if (!email || !email.includes('@')) return email || '—';
+  const [local, domain] = email.split('@');
+  const visible = local.slice(0, 2);
+  return visible + '•'.repeat(Math.max(2, local.length - 2)) + '@' + domain;
+}
+
+function renderDetail() {
+  const user = _allUsers.find(u => String(u.id) === String(selectedUserId));
+  if (!user) return;
+
+  const isSelf   = currentUser && String(user.id) === String(currentUser.id);
+  const isMaster = !!user.isAdminMaster;
+  const uid      = String(user.id);
 
   const permsHtml = PERMISSIONS_LIST.map(p => {
     const has = (user.permissions||[]).includes(p.key);
-    return `<div class="perm-item ${has?'checked':''}" onclick="togglePerm(${user.id},'${p.key}',this)">
+    return `<div class="perm-item ${has?'checked':''}" onclick="togglePerm('${uid}','${p.key}',this)">
       <div class="perm-checkbox">${has?'✓':''}</div>
       <div class="perm-label">${escapeHtml(p.label)}<small>${escapeHtml(p.desc)}</small></div>
     </div>`;
@@ -619,70 +633,39 @@ function renderDetail() {
         ${isMaster ? '<span class="master-badge-lg">ADMIN MASTER</span>' : ''}
       </div>
       <div class="detail-actions">
-        <button class="btn-outline" onclick="resetToRole(${user.id})">Restaurar Perfil</button>
-        <button class="btn-primary" onclick="saveUser(${user.id})">Salvar Alterações</button>
-        ${!isMaster && !isSelf ? `<button class="btn-danger" onclick="askDelete(${user.id})">Excluir</button>` : ''}
+        ${!isMaster && !isSelf ? `<button class="btn-danger" onclick="askDelete('${uid}')">Excluir</button>` : ''}
       </div>
     </div>
 
     ${isMaster ? '<div class="redirect-banner" style="background:rgba(26,26,46,.06);border-color:#e2c97e"><span>🔐 <strong>Administrador Master</strong> — conta protegida. Não pode ser excluída nem rebaixada de perfil.</span></div>' : ''}
-    ${isSelf && !isMaster ? '<div class="redirect-banner"><span>Você está editando <strong>seu próprio perfil</strong>. Alterações de acesso valem no próximo login.</span></div>' : ''}
+    ${isSelf && !isMaster ? '<div class="redirect-banner"><span>Este é <strong>seu próprio perfil</strong>.</span></div>' : ''}
 
     <div class="card">
-      <div class="card-title">Dados Pessoais</div>
-      <div class="field-grid">
-        <div class="field-group"><div class="field-label">Nome</div>
-          <input class="field-input" type="text" id="ed-nome-${user.id}" value="${escapeHtml(user.nome||user.name.split(' ')[0]||'')}"></div>
-        <div class="field-group"><div class="field-label">Sobrenome</div>
-          <input class="field-input" type="text" id="ed-sobrenome-${user.id}" value="${escapeHtml(user.sobrenome||user.name.split(' ').slice(1).join(' ')||'')}"></div>
-        <div class="field-group"><div class="field-label">CPF</div>
-          <input class="field-input" type="text" id="ed-cpf-${user.id}" value="${escapeHtml(user.cpf||'')}" placeholder="000.000.000-00" maxlength="14" oninput="mascaraCPFInput(this)" ${isMaster?'readonly style="opacity:.55"':''}></div>
-        <div class="field-group"><div class="field-label">Nascimento ${nascBadge}</div>
-          <input class="field-input" type="date" id="ed-nasc-${user.id}" value="${escapeHtml(user.nascimento||'')}" onchange="updateDetailAge(${user.id})">
-          <div id="ed-age-${user.id}" style="margin-top:5px"></div></div>
-        <div class="field-group"><div class="field-label">Telefone</div>
-          <input class="field-input" type="tel" id="ed-tel-${user.id}" value="${escapeHtml(user.telefone||'')}" placeholder="(00) 00000-0000" maxlength="15" oninput="mascaraTelefoneInput(this)"></div>
-        <div class="field-group"><div class="field-label">E-mail</div>
-          <input class="field-input" type="email" id="ed-email-${user.id}" value="${escapeHtml(user.email||'')}">
-          <span class="field-error" id="err-ed-email-${user.id}"></span></div>
+      <div class="card-title">Dados do Perfil</div>
+      <div class="detail-info-grid">
+        <div class="detail-info-item"><span class="detail-info-label">Nome completo</span><span class="detail-info-value">${escapeHtml(user.name||'—')}</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Usuário (login)</span><span class="detail-info-value">@${escapeHtml(user.username||'—')}</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">E-mail</span><span class="detail-info-value">${escapeHtml(maskEmail(user.email))}</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Telefone</span><span class="detail-info-value">${escapeHtml(user.telefone||'—')}</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">CPF</span><span class="detail-info-value detail-censored">${escapeHtml(maskCPF(user.cpf))}</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Senha</span><span class="detail-info-value detail-censored">••••••••</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Nascimento</span><span class="detail-info-value">${escapeHtml(user.nascimento||'—')}${user.idade ? ' <em style="color:var(--text-light);font-size:.8rem">('+user.idade+' anos)</em>' : ''}</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Perfil</span><span class="detail-info-value"><span class="badge badge-${escapeHtml(user.role)}">${ROLE_LABELS[user.role]||escapeHtml(user.role)}</span></span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Status</span><span class="detail-info-value"><span class="badge ${user.active?'badge-active':'badge-inactive'}">${user.active?'Ativo':'Inativo'}</span></span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Último acesso</span><span class="detail-info-value">${escapeHtml(user.lastLogin||'—')}</span></div>
+        <div class="detail-info-item"><span class="detail-info-label">Cadastrado em</span><span class="detail-info-value">${escapeHtml(user.createdAt||'—')}</span></div>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">Credenciais de Acesso</div>
-      <div class="field-grid">
-        <div class="field-group"><div class="field-label">Nome de Usuário (login)</div>
-          <input class="field-input" type="text" id="ed-user-${user.id}" value="${escapeHtml(user.username)}" oninput="slugifyUsername(this)" ${isMaster?'readonly style="opacity:.55"':''}></div>
-        <div class="field-group"><div class="field-label">Nova Senha <span style="color:var(--text-light);font-weight:300">(vazio = manter)</span></div>
-          <input class="field-input" type="password" id="ed-pass-${user.id}" placeholder="Mín. 6 caracteres">
-          <span class="field-error" id="err-ed-pass-${user.id}"></span></div>
-        <div class="field-group"><div class="field-label">Perfil de Acesso</div>
-          <select class="field-select" id="ed-role-${user.id}" onchange="applyRoleDefaults(${user.id},this.value)" ${isMaster?'disabled style="opacity:.55"':''}>
-            <option value="admin"  ${user.role==='admin' ?'selected':''}>Administrador</option>
-            <option value="viewer" ${user.role==='viewer'?'selected':''}>Visualizador</option>
-          </select></div>
-        <div class="field-group"><div class="field-label">Status da Conta</div>
-          <select class="field-select" id="ed-active-${user.id}" ${isMaster?'disabled style="opacity:.55"':''}>
-            <option value="true"  ${user.active ?'selected':''}>Ativo</option>
-            <option value="false" ${!user.active?'selected':''}>Inativo</option>
-          </select></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Permissões Individuais</div>
-      <p style="font-size:.78rem;color:var(--text-light);margin-bottom:14px">Alterar o perfil acima aplica as permissões padrão daquele perfil.</p>
+      <div class="card-title">Permissões de Acesso ao Sistema</div>
+      <p style="font-size:.78rem;color:var(--text-light);margin-bottom:14px">Clique em uma permissão para ativar ou desativar o acesso.</p>
       <div class="perm-grid">${permsHtml}</div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Informações do Sistema</div>
-      <div class="field-grid">
-        <div class="field-group"><div class="field-label">Último Acesso</div><div class="field-value last-login">${escapeHtml(user.lastLogin||'—')}</div></div>
-        <div class="field-group"><div class="field-label">Cadastrado em</div><div class="field-value">${escapeHtml(user.createdAt||'—')}</div></div>
-        <div class="field-group"><div class="field-label">Perfil</div><div class="field-value"><span class="badge badge-${escapeHtml(user.role)}">${ROLE_LABELS[user.role]||escapeHtml(user.role)}</span></div></div>
-        <div class="field-group"><div class="field-label">Status</div><div class="field-value"><span class="badge ${user.active?'badge-active':'badge-inactive'}">${user.active?'Ativo':'Inativo'}</span></div></div>
-      </div>
+      ${!isMaster ? `
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-outline btn-sm" onclick="applyRoleDefaults('${uid}','admin')">Restaurar como Administrador</button>
+        <button class="btn-outline btn-sm" onclick="applyRoleDefaults('${uid}','viewer')">Restaurar como Visualizador</button>
+      </div>` : ''}
     </div>
   `;
 }
@@ -699,7 +682,7 @@ function updateDetailAge(userId) {
 // PERMISSÕES
 // ══════════════════════════════════════════
 async function togglePerm(userId, key, el) {
-  const user = _allUsers.find(u => u.id === userId);
+  const user = _allUsers.find(u => String(u.id) === String(userId));
   if (!user) return;
   const idx = (user.permissions||[]).indexOf(key);
   if (idx > -1) { user.permissions.splice(idx,1); el.classList.remove('checked'); el.querySelector('.perm-checkbox').textContent=''; }
@@ -708,7 +691,7 @@ async function togglePerm(userId, key, el) {
 }
 
 async function applyRoleDefaults(userId, role) {
-  const user = _allUsers.find(u => u.id === userId);
+  const user = _allUsers.find(u => String(u.id) === String(userId));
   if (!user) return;
   user.role = role; user.permissions = [...ROLE_DEFAULTS[role]];
   await dbUpdateUser(user); renderDetail();
@@ -716,7 +699,7 @@ async function applyRoleDefaults(userId, role) {
 }
 
 async function resetToRole(userId) {
-  const user = _allUsers.find(u => u.id === userId);
+  const user = _allUsers.find(u => String(u.id) === String(userId));
   if (!user) return;
   const role = document.getElementById(`ed-role-${userId}`)?.value || user.role;
   user.permissions = [...ROLE_DEFAULTS[role]];
@@ -728,7 +711,7 @@ async function resetToRole(userId) {
 // SALVAR USUÁRIO
 // ══════════════════════════════════════════
 async function saveUser(userId) {
-  const user = _allUsers.find(u => u.id === userId);
+  const user = _allUsers.find(u => String(u.id) === String(userId));
   if (!user) return;
 
   const newNome      = document.getElementById(`ed-nome-${userId}`)?.value.trim();
@@ -750,7 +733,7 @@ async function saveUser(userId) {
     if (el) { el.textContent='E-mail inválido'; el.classList.add('show'); }
     showToast('E-mail inválido', true); return;
   }
-  const dup = _allUsers.find(u => u.username === newUsername && u.id !== userId);
+  const dup = _allUsers.find(u => u.username === newUsername && String(u.id) !== String(userId));
   if (dup) { showToast('Nome de usuário já está em uso', true); return; }
 
   if (newPass && newPass.length > 0) {
@@ -843,17 +826,17 @@ async function saveNewUser() {
 // EXCLUIR USUÁRIO
 // ══════════════════════════════════════════
 function askDelete(id) {
-  const user=_allUsers.find(u=>u.id===id);
+  const user=_allUsers.find(u=>String(u.id)===String(id));
   if (!user) return;
   if (user.isAdminMaster) { showToast('O Administrador Master não pode ser excluído.', true); return; }
-  deleteTargetId=id;
+  deleteTargetId=String(id);
   document.getElementById('del-name-label').textContent=user.name;
   document.getElementById('del-modal').classList.add('open');
 }
 function closeDelModal() { document.getElementById('del-modal').classList.remove('open'); deleteTargetId=null; }
 async function confirmDelete() {
   if (!deleteTargetId) return;
-  const user=_allUsers.find(u=>u.id===deleteTargetId);
+  const user=_allUsers.find(u=>String(u.id)===String(deleteTargetId));
   if (user?.isAdminMaster) { showToast('O Administrador Master não pode ser excluído.', true); closeDelModal(); return; }
   await dbDeleteUser(deleteTargetId);
   selectedUserId=null;

@@ -1457,3 +1457,44 @@
     white-space: normal;
   }
   .reg-role-info span { display: inline; }
+
+/* ════════════════ RESET SCREEN ════════════════ */
+#screen-reset {
+  min-height: 100vh;
+  display: flex;
+}
+
+/* ════════════════ DETAIL INFO GRID (read-only) ════════════════ */
+.detail-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px 20px;
+}
+
+.detail-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-info-label {
+  font-size: .72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .7px;
+  color: var(--text-light);
+}
+
+.detail-info-value {
+  font-size: .9rem;
+  color: var(--text-dark);
+  font-weight: 400;
+  word-break: break-all;
+}
+
+.detail-censored {
+  font-family: monospace;
+  letter-spacing: 2px;
+  color: var(--text-light) !important;
+  user-select: none;
+}
