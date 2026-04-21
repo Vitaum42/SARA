@@ -1,29 +1,44 @@
-  const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
+const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
 
   // ─── Guarda de Autenticação ──────────────────────────────────────────────
   (function checkAuth() {
     const stored = sessionStorage.getItem('saraCurrentUser');
-    if (!stored) {
-      window.location.href = 'index.html';
-      return;
-    }
+    if (!stored) { window.location.href = 'index.html'; return; }
     try {
       const user = JSON.parse(stored);
-      // VIEWER não pode acessar painel admin — mas pode estar aqui normalmente
-      // Ocultar itens de menu que requerem permissão admin
-      if (user.role !== 'admin') {
-        // Esconde itens de navegação restritos a admin
-        const adminNavItems = ['register', 'expenses', 'demands', 'reports'];
-        adminNavItems.forEach(key => {
+      const perms = user.permissions || [];
+      const hasPerm = (p) => perms.includes(p);
+
+      // Mapeamento: chave de navegação → permissão necessária
+      const NAV_PERM_MAP = {
+        register:    'edit_politicians',
+        expenses:    'view_expenses',
+        demands:     'view_demands',
+        reports:     'reports',
+        eligibility: 'view_eligibility',
+        politicians: 'view_politicians',
+        legislative: 'view_politicians',
+      };
+
+      // Esconde cada item de nav que o usuário não tem permissão
+      Object.entries(NAV_PERM_MAP).forEach(([key, perm]) => {
+        if (!hasPerm(perm)) {
           const navEl = document.querySelector(`[onclick*="navigate('${key}'"]`);
           if (navEl) navEl.style.display = 'none';
-        });
-        // Esconde botões de ação que requerem edição
-        document.querySelectorAll('.btn-primary, .btn-outline[onclick*="openModal"], .btn-outline[onclick*="navigate"]').forEach(btn => {
+        }
+      });
+
+      // Esconde botões de ação que requerem permissões de edição
+      if (!hasPerm('edit_politicians')) {
+        document.querySelectorAll('.btn-primary, .btn-outline').forEach(btn => {
           const txt = btn.textContent || '';
-          if (txt.includes('Cadastrar') || txt.includes('Nova Demanda') || txt.includes('+ ')) {
-            btn.style.display = 'none';
-          }
+          if (txt.includes('Cadastrar') || txt.includes('+ Cadastrar')) btn.style.display = 'none';
+        });
+      }
+      if (!hasPerm('edit_demands')) {
+        document.querySelectorAll('.btn-primary, .btn-outline').forEach(btn => {
+          const txt = btn.textContent || '';
+          if (txt.includes('Nova Demanda')) btn.style.display = 'none';
         });
       }
     } catch(e) { window.location.href = 'index.html'; }

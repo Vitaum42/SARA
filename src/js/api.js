@@ -600,15 +600,36 @@ document.addEventListener('DOMContentLoaded', initAPI);
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Busca proposições de autoria de um deputado.
+ * Busca proposições de autoria de um deputado e enriquece cada uma
+ * com a situação real via /proposicoes/{id} em paralelo.
  */
 async function buscarProposicoesDeputado(id, ano) {
-  return await fetchCamara('/proposicoes', {
+  const lista = await fetchCamara('/proposicoes', {
     idDeputadoAutor: id,
     ano,
     itens: 30,
     ordenarPor: 'ano',
     ordem: 'DESC'
+  });
+
+  if (!lista || lista.length === 0) return lista;
+
+  // Busca detalhes em paralelo — situação real fica em statusProposicao
+  const detalhes = await Promise.allSettled(
+    lista.map(p => fetchCamara('/proposicoes/' + p.id, {}, true))
+  );
+
+  return lista.map((p, i) => {
+    const det    = detalhes[i].status === 'fulfilled' ? detalhes[i].value : null;
+    const status = det?.statusProposicao || {};
+    return {
+      ...p,
+      descricaoSituacao: status.descricaoSituacao  || p.descricaoSituacao  || null,
+      descricaoTipo:     det?.descricaoTipo         || p.descricaoTipo      || null,
+      urlInteiroTeor:    det?.urlInteiroTeor         || null,
+      _orgaoSituacao:    status.siglaOrgao           || null,
+      _dataUltAtu:       status.dataHora             || null,
+    };
   });
 }
 
@@ -660,6 +681,18 @@ function renderEmpty(containerId, msg = 'Nenhum registro encontrado.') {
   if (el) el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-light)">📭 ${msg}</div>`;
 }
 
+function _situacaoBadge(sit) {
+  if (!sit) return '<span class="prop-sit prop-sit-default">Carregando…</span>';
+  const s = sit.toLowerCase();
+  if (s.includes('aprovad') || s.includes('transform') || s.includes('sancion'))
+    return '<span class="prop-sit prop-sit-green">' + escapeHtml(sit) + '</span>';
+  if (s.includes('arquivad') || s.includes('rejeitad') || s.includes('prejudicad'))
+    return '<span class="prop-sit prop-sit-red">' + escapeHtml(sit) + '</span>';
+  if (s.includes('plen') || s.includes('votac') || s.includes('pauta'))
+    return '<span class="prop-sit prop-sit-yellow">' + escapeHtml(sit) + '</span>';
+  return '<span class="prop-sit prop-sit-default">' + escapeHtml(sit) + '</span>';
+}
+
 function renderProposicoes(proposicoes) {
   const el = document.getElementById('leg-list-prop');
   if (!el) return;
@@ -667,21 +700,29 @@ function renderProposicoes(proposicoes) {
 
   if (!proposicoes || proposicoes.length === 0) { renderEmpty('leg-list-prop', 'Nenhuma proposição encontrada.'); return; }
 
-  el.innerHTML = proposicoes.map(p => `
+  el.innerHTML = proposicoes.map(p => {
+    const dataAtu = p._dataUltAtu ? p._dataUltAtu.substring(0, 10).split('-').reverse().join('/') : null;
+    const orgao   = p._orgaoSituacao || null;
+    const meta    = [p.descricaoTipo, orgao, dataAtu ? 'Atualizado em ' + dataAtu : null].filter(Boolean).join(' · ');
+    const teor    = p.urlInteiroTeor ? ` <a href="${escapeHtml(p.urlInteiroTeor)}" target="_blank" class="action-btn" style="white-space:nowrap;text-decoration:none;margin-left:6px">📄 Texto</a>` : '';
+    return `
     <div style="padding:14px;border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:.88rem;margin-bottom:4px">
-          <span style="background:var(--bg-alt,#f4f4f5);padding:2px 8px;color:black;border-radius:12px;font-size:.75rem;margin-right:8px">${p.siglaTipo || '—'} ${p.numero || ''}/${p.ano || ''}</span>
-          ${p.ementa || 'Sem ementa.'}
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:.88rem;margin-bottom:6px;line-height:1.4">
+          <span class="leg-tipo-badge">${escapeHtml(p.siglaTipo || '—')} ${p.numero || ''}/${p.ano || ''}</span>
+          ${escapeHtml(p.ementa || 'Sem ementa.')}
         </div>
-        <div style="font-size:.76rem;color:var(--text-light);margin-top:4px">
-          🗂 ${p.descricaoTipo || '—'} · Situação: ${p.descricaoSituacao || 'Em tramitação'}
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:.76rem;color:var(--text-light)">
+          ${_situacaoBadge(p.descricaoSituacao)}
+          ${meta ? '<span>' + escapeHtml(meta) + '</span>' : ''}
         </div>
       </div>
-      <a href="https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=${p.id}"
-         target="_blank" class="action-btn" style="white-space:nowrap;text-decoration:none">Ver ↗</a>
-    </div>
-  `).join('');
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <a href="https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=${p.id}"
+           target="_blank" class="action-btn" style="white-space:nowrap;text-decoration:none">Ver ↗</a>${teor}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderVotacoes(votacoes) {

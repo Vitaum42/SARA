@@ -650,8 +650,6 @@ function renderDetail() {
         <div class="detail-info-item"><span class="detail-info-label">CPF</span><span class="detail-info-value detail-censored">${escapeHtml(maskCPF(user.cpf))}</span></div>
         <div class="detail-info-item"><span class="detail-info-label">Senha</span><span class="detail-info-value detail-censored">••••••••</span></div>
         <div class="detail-info-item"><span class="detail-info-label">Nascimento</span><span class="detail-info-value">${escapeHtml(user.nascimento||'—')}${user.idade ? ' <em style="color:var(--text-light);font-size:.8rem">('+user.idade+' anos)</em>' : ''}</span></div>
-        <div class="detail-info-item"><span class="detail-info-label">Perfil</span><span class="detail-info-value"><span class="badge badge-${escapeHtml(user.role)}">${ROLE_LABELS[user.role]||escapeHtml(user.role)}</span></span></div>
-        <div class="detail-info-item"><span class="detail-info-label">Status</span><span class="detail-info-value"><span class="badge ${user.active?'badge-active':'badge-inactive'}">${user.active?'Ativo':'Inativo'}</span></span></div>
         <div class="detail-info-item"><span class="detail-info-label">Último acesso</span><span class="detail-info-value">${escapeHtml(user.lastLogin||'—')}</span></div>
         <div class="detail-info-item"><span class="detail-info-label">Cadastrado em</span><span class="detail-info-value">${escapeHtml(user.createdAt||'—')}</span></div>
       </div>
@@ -659,13 +657,11 @@ function renderDetail() {
 
     <div class="card">
       <div class="card-title">Permissões de Acesso ao Sistema</div>
-      <p style="font-size:.78rem;color:var(--text-light);margin-bottom:14px">Clique em uma permissão para ativar ou desativar o acesso.</p>
+      <p style="font-size:.78rem;color:var(--text-light);margin-bottom:14px">
+        Clique para ativar ou desativar cada permissão. As alterações são salvas imediatamente.
+        O usuário precisa fazer <strong>logout e login</strong> para as mudanças valerem no sistema.
+      </p>
       <div class="perm-grid">${permsHtml}</div>
-      ${!isMaster ? `
-      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn-outline btn-sm" onclick="applyRoleDefaults('${uid}','admin')">Restaurar como Administrador</button>
-        <button class="btn-outline btn-sm" onclick="applyRoleDefaults('${uid}','viewer')">Restaurar como Visualizador</button>
-      </div>` : ''}
     </div>
   `;
 }
@@ -684,18 +680,58 @@ function updateDetailAge(userId) {
 async function togglePerm(userId, key, el) {
   const user = _allUsers.find(u => String(u.id) === String(userId));
   if (!user) return;
-  const idx = (user.permissions||[]).indexOf(key);
-  if (idx > -1) { user.permissions.splice(idx,1); el.classList.remove('checked'); el.querySelector('.perm-checkbox').textContent=''; }
-  else          { user.permissions.push(key);      el.classList.add('checked');    el.querySelector('.perm-checkbox').textContent='✓'; }
-  await dbUpdateUser(user);
+  if (!user.permissions) user.permissions = [];
+  const idx = user.permissions.indexOf(key);
+  // Atualiza visualmente e em memória imediatamente
+  if (idx > -1) {
+    user.permissions.splice(idx, 1);
+    el.classList.remove('checked');
+    el.querySelector('.perm-checkbox').textContent = '';
+  } else {
+    user.permissions.push(key);
+    el.classList.add('checked');
+    el.querySelector('.perm-checkbox').textContent = '✓';
+  }
+  // Persiste no Firestore sem recarregar _allUsers (evita condição de corrida)
+  try {
+    await dbUpdateUser(user);
+  } catch(e) {
+    // Reverte se falhou
+    if (idx > -1) { user.permissions.push(key); el.classList.add('checked'); el.querySelector('.perm-checkbox').textContent='✓'; }
+    else { user.permissions.splice(-1,1); el.classList.remove('checked'); el.querySelector('.perm-checkbox').textContent=''; }
+    showToast('Erro ao salvar permissão. Tente novamente.', true);
+  }
 }
 
 async function applyRoleDefaults(userId, role) {
   const user = _allUsers.find(u => String(u.id) === String(userId));
   if (!user) return;
   user.role = role; user.permissions = [...ROLE_DEFAULTS[role]];
-  await dbUpdateUser(user); renderDetail();
-  showToast(`Permissões de "${ROLE_LABELS[role]}" aplicadas`);
+  await dbUpdateUser(user);
+  await reloadUsers();
+  renderUserList(document.querySelector('.user-search input')?.value||'');
+  renderDetail();
+  showToast(`Permissões de "${ROLE_LABELS[role]}" aplicadas com sucesso`);
+}
+
+async function saveRoleAndStatus(userId) {
+  const user = _allUsers.find(u => String(u.id) === String(userId));
+  if (!user) return;
+  const newRole   = document.getElementById('role-select-'+userId)?.value   || user.role;
+  const newActive = document.getElementById('active-select-'+userId)?.value === 'true';
+  const roleMudou = newRole !== user.role;
+  user.role    = newRole;
+  user.active  = newActive;
+  // Aplica permissões padrão do novo perfil quando o papel muda
+  if (roleMudou) user.permissions = [...ROLE_DEFAULTS[newRole]];
+  await dbUpdateUser(user);
+  await reloadUsers();
+  renderUserList(document.querySelector('.user-search input')?.value||'');
+  renderDetail();
+  const msg = roleMudou
+    ? `Perfil alterado para ${ROLE_LABELS[newRole]}. O usuário deve fazer logout e login para as mudanças valerem.`
+    : 'Status atualizado com sucesso.';
+  showToast(msg);
 }
 
 async function resetToRole(userId) {
