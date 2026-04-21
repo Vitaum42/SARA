@@ -124,7 +124,127 @@ function togglePass() {
 }
 
 function forgotPass() {
-  showToast('Contate o administrador do sistema para redefinir sua senha.');
+  document.getElementById('screen-login').style.display = 'none';
+  document.getElementById('screen-reset').style.display = 'flex';
+  ['reset-user','reset-email','reset-pass','reset-pass2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.classList.remove('error'); }
+  });
+  ['err-reset-user','err-reset-email','err-reset-pass','err-reset-pass2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = ''; el.classList.remove('show'); }
+  });
+}
+
+function closeResetScreen() {
+  document.getElementById('screen-reset').style.display = 'none';
+  document.getElementById('screen-login').style.display = 'flex';
+}
+
+function toggleResetPass(inputId, openId, closedId) {
+  const inp = document.getElementById(inputId);
+  if (!inp) return;
+  const isPass = inp.type === 'password';
+  inp.type = isPass ? 'text' : 'password';
+  const open   = document.getElementById(openId);
+  const closed = document.getElementById(closedId);
+  if (open)   open.style.display   = isPass ? 'none' : '';
+  if (closed) closed.style.display = isPass ? ''     : 'none';
+}
+
+async function doResetPassword() {
+  const uInput  = document.getElementById('reset-user');
+  const eInput  = document.getElementById('reset-email');
+  const p1Input = document.getElementById('reset-pass');
+  const p2Input = document.getElementById('reset-pass2');
+  const errU    = document.getElementById('err-reset-user');
+  const errE    = document.getElementById('err-reset-email');
+  const errP    = document.getElementById('err-reset-pass');
+  const errP2   = document.getElementById('err-reset-pass2');
+  const btn     = document.getElementById('btn-reset');
+  const loader  = document.getElementById('reset-loader');
+  const btnTxt  = document.getElementById('btn-reset-text');
+
+  // Limpa erros
+  [uInput, eInput, p1Input, p2Input].forEach(i => i.classList.remove('error'));
+  [errU, errE, errP, errP2].forEach(e => { e.textContent = ''; e.classList.remove('show'); });
+
+  const username     = uInput.value.trim();
+  const emailDigitado = eInput.value.trim().toLowerCase();
+  const novaSenha    = p1Input.value;
+  const confirmSenha = p2Input.value;
+
+  // Validações locais
+  let ok = true;
+  if (!username) {
+    uInput.classList.add('error'); errU.textContent = 'Informe o nome de usuário.'; errU.classList.add('show'); ok = false;
+  }
+  if (!emailDigitado || !validarEmail(emailDigitado)) {
+    eInput.classList.add('error'); errE.textContent = 'Informe um e-mail válido.'; errE.classList.add('show'); ok = false;
+  }
+  const sc = validarSenhaForte(novaSenha);
+  if (!sc.valido) {
+    p1Input.classList.add('error'); errP.textContent = sc.msg; errP.classList.add('show'); ok = false;
+  }
+  if (novaSenha !== confirmSenha) {
+    p2Input.classList.add('error'); errP2.textContent = 'As senhas não conferem.'; errP2.classList.add('show'); ok = false;
+  }
+  if (!ok) return;
+
+  btn.disabled = true;
+  loader.style.display = 'inline-block';
+  btnTxt.textContent = 'Verificando...';
+
+  const shake = () => {
+    const card = document.querySelector('#screen-reset .login-card');
+    if (card) { card.classList.add('shake'); setTimeout(() => card.classList.remove('shake'), 400); }
+  };
+
+  try {
+    const user = await dbGetUserByUsername(username);
+
+    // Mensagem genérica — não revela se usuário existe ou não
+    if (!user || user.email.toLowerCase() !== emailDigitado) {
+      loader.style.display = 'none'; btnTxt.textContent = 'Redefinir Senha'; btn.disabled = false;
+      eInput.classList.add('error');
+      errE.textContent = 'Usuário ou e-mail não correspondem a nenhum perfil cadastrado.';
+      errE.classList.add('show');
+      shake();
+      return;
+    }
+
+    if (user.isAdminMaster) {
+      loader.style.display = 'none'; btnTxt.textContent = 'Redefinir Senha'; btn.disabled = false;
+      uInput.classList.add('error');
+      errU.textContent = 'A senha do Administrador Master não pode ser redefinida por aqui.';
+      errU.classList.add('show');
+      shake();
+      return;
+    }
+
+    if (!user.active) {
+      loader.style.display = 'none'; btnTxt.textContent = 'Redefinir Senha'; btn.disabled = false;
+      uInput.classList.add('error');
+      errU.textContent = 'Conta desativada. Contate o administrador.';
+      errU.classList.add('show');
+      return;
+    }
+
+    user.passwordHash = await hashSenha(novaSenha);
+    await dbUpdateUser(user);
+
+    btnTxt.textContent = 'Senha redefinida ✓';
+    showToast('Senha redefinida com sucesso! Faça login com a nova senha.');
+    setTimeout(() => {
+      loader.style.display = 'none'; btn.disabled = false; btnTxt.textContent = 'Redefinir Senha';
+      closeResetScreen();
+    }, 1800);
+
+  } catch (err) {
+    console.error('[SARA] Erro ao redefinir senha:', err);
+    loader.style.display = 'none'; btnTxt.textContent = 'Redefinir Senha'; btn.disabled = false;
+    showToast('Erro interno. Tente novamente.', true);
+  }
 }
 
 document.addEventListener('keydown', e => {
