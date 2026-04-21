@@ -704,6 +704,7 @@
     background: none;
     border: 1px solid var(--green-200);
     color: var(--green-600);
+    background-color: white;
     padding: 5px 12px;
     border-radius: 6px;
     font-size: 0.76rem;
