@@ -61,20 +61,30 @@ const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
     document.querySelector('.sidebar').classList.toggle('open');
   }
 
-  // ─── Demandas — com persistência localStorage ─────────────────────────────
+  // ─── Demandas — persistência no Firestore ────────────────────────────────
 
-  const DEMANDAS_PADRAO = [
-    { id: 'DEM-001', titulo: 'Ampliação da UBS Jardim das Flores', area: 'Saúde', politico: 'Ana Souza', regiao: 'São Paulo — SP', prioridade: 'Alta', status: 'Em Andamento', data: '12/01/2025', solicitante: 'Solicitado por moradores do bairro' },
-    { id: 'DEM-002', titulo: 'Pavimentação da Rua 7 de Setembro', area: 'Infraestrutura', politico: 'Rodrigo Costa', regiao: 'Belo Horizonte — MG', prioridade: 'Média', status: 'Em Andamento', data: '15/01/2025', solicitante: 'Associação de moradores' },
-    { id: 'DEM-003', titulo: 'Iluminação pública no Setor Norte', area: 'Obras', politico: 'Maria Ferreira', regiao: 'Brasília — DF', prioridade: 'Baixa', status: 'Concluída', data: '05/02/2025', solicitante: 'Conselho comunitário' },
-    { id: 'DEM-004', titulo: 'Construção de creche no bairro Vila Nova', area: 'Educação', politico: 'Carlos Pinto', regiao: 'Porto Alegre — RS', prioridade: 'Média', status: 'Aberta', data: '20/02/2025', solicitante: 'Pais e responsáveis' },
-    { id: 'DEM-005', titulo: 'Reforma da Escola Municipal Centro', area: 'Educação', politico: 'Ana Souza', regiao: 'Recife — PE', prioridade: 'Alta', status: 'Aberta', data: '01/03/2025', solicitante: 'Comunidade escolar' },
-  ];
+  let DEMANDAS = [];
 
-  const DEMANDAS = carregarDoStorage(STORAGE_KEYS.DEMANDAS) || [...DEMANDAS_PADRAO];
-
-  function persistirDemandas() {
-    salvarNoStorage(STORAGE_KEYS.DEMANDAS, DEMANDAS);
+  function carregarDemandasFirestore() {
+    _db.collection('demandas').onSnapshot(
+      snapshot => {
+        DEMANDAS = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Ordena por data decrescente (mais recentes primeiro)
+        DEMANDAS.sort((a, b) => {
+          const toDate = str => {
+            if (!str) return 0;
+            const [d, m, y] = str.split('/');
+            return new Date(`${y}-${m}-${d}`).getTime();
+          };
+          return toDate(b.data) - toDate(a.data);
+        });
+        renderDashboardDemandas();
+        renderTabelaDemandas(DEMANDAS);
+      },
+      err => {
+        console.error('[SARA] Erro no listener de demandas:', err);
+      }
+    );
   }
 
   const PRIORIDADE_COLOR = { Alta: '#ef4444', Média: '#eab308', Baixa: '#3a7a3e' };
@@ -137,14 +147,18 @@ const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
       </tr>`).join('');
   }
 
-  // ─── Salva nova demanda e sincroniza dashboard + tabela ──────────────────
-  function registrarNovaDemanda(dados) {
-    const novoId = 'DEM-' + String(DEMANDAS.length + 1).padStart(3, '0');
+  // ─── Salva nova demanda no Firestore e sincroniza dashboard + tabela ─────
+  async function registrarNovaDemanda(dados) {
     const hoje = new Date().toLocaleDateString('pt-BR');
-    DEMANDAS.unshift({ id: novoId, ...dados, data: hoje });
-    persistirDemandas();
-    renderDashboardDemandas();
-    renderTabelaDemandas(DEMANDAS);
+    try {
+      const salva = await dbCreateDemanda({ ...dados, data: hoje });
+      DEMANDAS.unshift(salva);
+      renderDashboardDemandas();
+      renderTabelaDemandas(DEMANDAS);
+    } catch (e) {
+      console.error('[SARA] Erro ao salvar demanda no Firestore:', e);
+      showToast('Erro ao salvar demanda. Tente novamente.', true);
+    }
   }
 
   // ─── Renderiza "Políticos Recentes" no dashboard com dados da API ────────
@@ -320,7 +334,7 @@ const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
     if (e.target === this) closeModal();
   });
 
-  function saveDemand() {
+  async function saveDemand() {
     const inputs = document.querySelectorAll('#demand-modal input, #demand-modal select, #demand-modal textarea');
     const titulo    = inputs[0]?.value?.trim() || '';
     const area      = inputs[1]?.value || 'Outros';
@@ -335,7 +349,7 @@ const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
       return;
     }
 
-    registrarNovaDemanda({ titulo, area, prioridade, politico, regiao, status: 'Aberta', solicitante: 'Registrado pelo sistema' });
+    await registrarNovaDemanda({ titulo, area, prioridade, politico, regiao, status: 'Aberta', solicitante: 'Registrado pelo sistema' });
     closeModal();
     showToast('Demanda registrada com sucesso!');
   }
@@ -382,8 +396,7 @@ const ROLE_LABELS_HOME = { admin: 'Administrador', viewer: 'Visualizador' };
   });
 
   document.addEventListener('DOMContentLoaded', function() {
-    renderDashboardDemandas();
-    renderTabelaDemandas(DEMANDAS);
+    carregarDemandasFirestore();
     initDemandFilters();
 
     // Aplicar máscaras nos campos de CPF e telefone do formulário de cadastro
